@@ -31,9 +31,12 @@ A especificação completa está em `docs/ESPECIFICACAO.md`. Lê-a antes de qual
 
 ```bash
 docker compose up -d                 # PostgreSQL, MongoDB, Redis (+ broker, se ativo)
+docker compose --profile observability up -d   # + Prometheus em http://localhost:9090
 dotnet build
-dotnet test
-dotnet run --project src/SmartParking.Api
+dotnet test                          # Microsoft.Testing.Platform (global.json); precisa do Docker (Testcontainers)
+dotnet test --project tests/SmartParking.ArchitectureTests   # um único projeto de testes
+dotnet run --project src/SmartParking.Api        # http://localhost:5080/swagger, /health/ready, /metrics
+dotnet run --project src/SmartParking.Workers    # http://localhost:5090/health/ready, /metrics
 dotnet run --project tools/SensorSimulator -- --sensors 5000 --rate 200
 ./bench/run.sh <cenario>             # gera results/<cenario>/<data>.csv
 ```
@@ -50,6 +53,11 @@ src/
   SmartParking.Infrastructure.Messaging/    publicação/consumo de eventos (D2)
   SmartParking.Api/               endpoints HTTP e ingestão
   SmartParking.Workers/           projeções, sincronização, retenção (RNF-05)
+  SmartParking.ServiceDefaults/   OpenTelemetry e health checks partilhados pela Api e pelos Workers (ADR-0001)
+tests/
+  SmartParking.ArchitectureTests/       regra de dependências (NetArchTest)
+  SmartParking.Api.IntegrationTests/    WebApplicationFactory + Testcontainers (PostgreSQL, MongoDB, Redis)
+infra/                            configuração de serviços auxiliares (Prometheus)
 tools/
   SensorSimulator/                gerador de eventos de sensores (UC-01, UC-05)
 bench/                            cenários de carga e scripts de medição
