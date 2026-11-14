@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="..\SmartParking.ServiceDefaults\SmartParking.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\SmartParking.Application\SmartParking.Application.csproj" />
+    <ProjectReference Include="..\SmartParking.Infrastructure.Relational\SmartParking.Infrastructure.Relational.csproj" />
+    <ProjectReference Include="..\SmartParking.Infrastructure.Documents\SmartParking.Infrastructure.Documents.csproj" />
+    <ProjectReference Include="..\SmartParking.Infrastructure.Cache\SmartParking.Infrastructure.Cache.csproj" />
+    <ProjectReference Include="..\SmartParking.Infrastructure.Messaging\SmartParking.Infrastructure.Messaging.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" />
+  </ItemGroup>
+</Project>
