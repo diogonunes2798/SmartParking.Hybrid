@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SmartParking.Domain\SmartParking.Domain.csproj" />
+    <ProjectReference Include="..\..\src\SmartParking.Application\SmartParking.Application.csproj" />
+    <ProjectReference Include="..\..\src\SmartParking.Infrastructure.Relational\SmartParking.Infrastructure.Relational.csproj" />
+    <ProjectReference Include="..\..\src\SmartParking.Infrastructure.Documents\SmartParking.Infrastructure.Documents.csproj" />
+    <ProjectReference Include="..\..\src\SmartParking.Infrastructure.Cache\SmartParking.Infrastructure.Cache.csproj" />
+    <ProjectReference Include="..\..\src\SmartParking.Infrastructure.Messaging\SmartParking.Infrastructure.Messaging.csproj" />
+    <ProjectReference Include="..\..\src\SmartParking.ServiceDefaults\SmartParking.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\..\src\SmartParking.Api\SmartParking.Api.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="NetArchTest.Rules" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+</Project>
