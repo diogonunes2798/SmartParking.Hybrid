@@ -1,0 +1,77 @@
+# Local infrastructure for the SmartParking.Hybrid prototype.
+# Images are pinned to an exact patch version AND content digest so that experiments are reproducible
+# (CLAUDE.md, reproducibility rule). Update them deliberately and record it in docs/DIARIO.md.
+#
+#   docker compose up -d                          # PostgreSQL, MongoDB, Redis
+#   docker compose --profile observability up -d  # + Prometheus (http://localhost:9090)
+#
+# Messaging (D2, default "PostgreSQL outbox + Redis Streams") needs no extra broker container.
+# Credentials are development-only defaults; override them in a local .env (see .env.example).
+
+name: smartparking-hybrid
+
+services:
+  postgres:
+    image: postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smartparking}
+      POSTGRES_USER: ${POSTGRES_USER:-smartparking}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smartparking}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mongo:
+    image: mongo:7.0.48@sha256:9896df581dfd0718b7abe112f4c37598d0986c54060e4ec1384997e6503c8c71
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-smartparking}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-smartparking}
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4.12-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+    # AOF persistence so that the read model survives a container restart (RNF-03 scenario).
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  prometheus:
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+    profiles: ["observability"]
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  postgres-data:
+  mongo-data:
+  redis-data:
+  prometheus-data:
