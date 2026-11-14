@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SmartParking.Api/SmartParking.Api.csproj" />
+    <Project Path="src/SmartParking.Application/SmartParking.Application.csproj" />
+    <Project Path="src/SmartParking.Domain/SmartParking.Domain.csproj" />
+    <Project Path="src/SmartParking.Infrastructure.Cache/SmartParking.Infrastructure.Cache.csproj" />
+    <Project Path="src/SmartParking.Infrastructure.Documents/SmartParking.Infrastructure.Documents.csproj" />
+    <Project Path="src/SmartParking.Infrastructure.Messaging/SmartParking.Infrastructure.Messaging.csproj" />
+    <Project Path="src/SmartParking.Infrastructure.Relational/SmartParking.Infrastructure.Relational.csproj" />
+    <Project Path="src/SmartParking.ServiceDefaults/SmartParking.ServiceDefaults.csproj" />
+    <Project Path="src/SmartParking.Workers/SmartParking.Workers.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SmartParking.Api.IntegrationTests/SmartParking.Api.IntegrationTests.csproj" />
+    <Project Path="tests/SmartParking.ArchitectureTests/SmartParking.ArchitectureTests.csproj" />
+  </Folder>
+</Solution>
