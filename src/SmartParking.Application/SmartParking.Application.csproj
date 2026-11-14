@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\SmartParking.Domain\SmartParking.Domain.csproj" />
+  </ItemGroup>
+</Project>
