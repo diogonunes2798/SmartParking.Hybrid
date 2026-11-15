@@ -17,7 +17,7 @@ internal sealed class EfUnitOfWork(SmartParkingDbContext context) : IUnitOfWork
     {
         try
         {
-            await context.SaveChangesAsync(cancellationToken);
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (DbUpdateConcurrencyException ex)
         {
@@ -52,7 +52,7 @@ internal class EfRepository<T>(SmartParkingDbContext context) : IRepository<T>
     protected SmartParkingDbContext Context { get; } = context;
 
     public async Task<T?> GetAsync(Guid id, CancellationToken cancellationToken) =>
-        await Context.Set<T>().FindAsync([id], cancellationToken);
+        await Context.Set<T>().FindAsync([id], cancellationToken).ConfigureAwait(false);
 
     public Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken) =>
         Context.Set<T>().AnyAsync(e => EF.Property<Guid>(e, "Id") == id, cancellationToken);

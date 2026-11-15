@@ -1,4 +1,6 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using SmartParking.Application.Configuration;
+using SmartParking.Application.Ingestion;
 using SmartParking.Application.Sessions;
 using SmartParking.Application.Users;
 using SmartParking.Domain.Tariffs;
@@ -11,8 +13,14 @@ namespace SmartParking.Api;
 /// </summary>
 internal static class ApplicationRegistration
 {
-    public static IServiceCollection AddApplicationHandlers(this IServiceCollection services)
+    public static IServiceCollection AddApplicationHandlers(this IServiceCollection services, IConfiguration configuration)
     {
+        // UC-01 (ingestion, steps 1–2). The bus (IEventBus) is registered by Infrastructure.Messaging.
+        services.AddSingleton(configuration.GetSection("Ingestion").Get<IngestionSettings>() ?? new IngestionSettings());
+        services.AddSingleton<OccupancyIngestionMetrics>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<IngestOccupancyBatchHandler>();
+
         // RF-06 (configuration CRUD), command side. The query side is IConfigurationQueries (Relational).
         services.AddScoped<FacilityCommands>();
         services.AddScoped<SpotCommands>();

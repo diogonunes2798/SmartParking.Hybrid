@@ -26,7 +26,7 @@ internal sealed class EfSessionQueries(SmartParkingDbContext context) : ISession
 {
     public async Task<SessionDto?> GetSessionAsync(Guid id, CancellationToken cancellationToken)
     {
-        var session = await context.Sessions.AsNoTracking().SingleOrDefaultAsync(s => s.Id == id, cancellationToken);
+        var session = await context.Sessions.AsNoTracking().SingleOrDefaultAsync(s => s.Id == id, cancellationToken).ConfigureAwait(false);
         return session is null ? null : SessionDto.From(session);
     }
 }

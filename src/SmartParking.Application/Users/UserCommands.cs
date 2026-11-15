@@ -37,21 +37,21 @@ public sealed class UserCommands(IRepository<User> users, IRepository<Vehicle> v
         ArgumentNullException.ThrowIfNull(command);
         var user = User.Create(command.DisplayName, command.Email);
         users.Add(user);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return UserDto.From(user);
     }
 
     public async Task<VehicleDto> CreateVehicleAsync(Guid userId, CreateVehicle command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
-        if (!await users.ExistsAsync(userId, cancellationToken))
+        if (!await users.ExistsAsync(userId, cancellationToken).ConfigureAwait(false))
         {
             throw new NotFoundException("User", userId);
         }
 
         var vehicle = Vehicle.Create(userId, command.LicensePlate, command.Type);
         vehicles.Add(vehicle);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return VehicleDto.From(vehicle);
     }
 }

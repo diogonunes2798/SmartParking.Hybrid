@@ -3,6 +3,7 @@ using SmartParking.Api;
 using SmartParking.Api.Endpoints;
 using SmartParking.Infrastructure.Cache;
 using SmartParking.Infrastructure.Documents;
+using SmartParking.Infrastructure.Messaging;
 using SmartParking.Infrastructure.Relational;
 using SmartParking.ServiceDefaults;
 
@@ -30,10 +31,11 @@ builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadReq
 
 var readiness = ServiceDefaultsExtensions.ReadinessTags;
 builder.Services
-    .AddApplicationHandlers()
+    .AddApplicationHandlers(builder.Configuration)
     .AddRelationalPersistence(builder.Configuration, readiness)
     .AddDocumentPersistence(builder.Configuration, readiness)
-    .AddCacheStore(builder.Configuration, readiness);
+    .AddCacheStore(builder.Configuration, readiness)
+    .AddEventBus(builder.Configuration);
 
 var app = builder.Build();
 
@@ -49,6 +51,7 @@ if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 app.MapDefaultEndpoints();
 app.MapConfigurationEndpoints();
 app.MapSessionEndpoints();
+app.MapIngestionEndpoints();
 
 await app.RunAsync();
 
