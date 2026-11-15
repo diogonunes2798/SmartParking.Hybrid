@@ -4,14 +4,15 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SmartParking.Application.Abstractions;
-using StackExchange.Redis;
 using System.Diagnostics.Metrics;
+using StackExchange.Redis;
 
 namespace SmartParking.Infrastructure.Messaging;
 
 /// <summary>
 /// Registers the event bus (D2 default: Redis Streams, ADR-0006). The bus uses the same Redis server as the read
-/// model (connection string <c>Redis</c>): with the D2 default there is no separate broker container.
+/// model (connection string <c>Redis</c>), through its own connection: with the D2 default there is no separate
+/// broker container.
 /// </summary>
 public static class DependencyInjection
 {
@@ -26,14 +27,15 @@ public static class DependencyInjection
         var connectionString = configuration.GetConnectionString(ConnectionStringName)
             ?? throw new InvalidOperationException($"Missing connection string '{ConnectionStringName}'.");
 
-        // Shared with Infrastructure.Cache when both are registered (whichever comes first creates it); same
-        // settings: start even if Redis is down and keep reconnecting (RNF-03 scenario).
-        services.TryAddSingleton<IConnectionMultiplexer>(_ =>
+        // The bus's own connection, opened asynchronously (RedisBusConnection). AbortOnConnectFail = false: start even
+        // if Redis is down and keep reconnecting (RNF-03 scenario).
+        if (!services.Any(d => d.ServiceType == typeof(RedisBusConnection)))
         {
             var options = ConfigurationOptions.Parse(connectionString);
             options.AbortOnConnectFail = false;
-            return ConnectionMultiplexer.Connect(options);
-        });
+            services.AddSingleton(_ => new RedisBusConnection(options)); // factory: the container disposes it
+            services.AddHostedService<RedisBusConnectionWarmup>();
+        }
 
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IEventBus, RedisStreamsEventBus>();
@@ -62,7 +64,7 @@ public static class DependencyInjection
         services.AddEventBus(configuration);
         services.TryAddScoped<THandler>();
         services.AddSingleton<IHostedService>(sp => new RedisStreamConsumer<THandler>(
-            sp.GetRequiredService<IConnectionMultiplexer>(),
+            sp.GetRequiredService<RedisBusConnection>(),
             sp.GetRequiredService<IServiceScopeFactory>(),
             options,
             sp.GetRequiredService<ILogger<RedisStreamConsumer<THandler>>>(),

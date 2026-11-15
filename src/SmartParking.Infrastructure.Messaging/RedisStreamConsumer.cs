@@ -32,16 +32,18 @@ public sealed class RedisStreamConsumer<THandler> : BackgroundService
 {
     private static readonly TimeSpan InitialBackoff = TimeSpan.FromMilliseconds(200);
 
-    private readonly IConnectionMultiplexer redis;
+    private readonly RedisBusConnection connection;
     private readonly IServiceScopeFactory scopes;
     private readonly RedisStreamConsumerOptions options;
     private readonly ILogger logger;
     private readonly TimeProvider time;
     private readonly Counter<long> handled;
+    private readonly Counter<long> failures;
     private readonly KeyValuePair<string, object?> groupTag;
+    private int consecutiveFailures;
 
-    public RedisStreamConsumer(
-        IConnectionMultiplexer redis,
+    internal RedisStreamConsumer(
+        RedisBusConnection connection,
         IServiceScopeFactory scopes,
         RedisStreamConsumerOptions options,
         ILogger<RedisStreamConsumer<THandler>> logger,
@@ -52,20 +54,32 @@ public sealed class RedisStreamConsumer<THandler> : BackgroundService
         ArgumentNullException.ThrowIfNull(meterFactory);
         options.Validate();
 
-        this.redis = redis;
+        this.connection = connection;
         this.scopes = scopes;
         this.options = options;
         this.logger = logger;
         this.time = time;
-        handled = meterFactory.Create(SmartParkingTelemetry.MeterName).CreateCounter<long>(
+        var meter = meterFactory.Create(SmartParkingTelemetry.MeterName);
+        handled = meter.CreateCounter<long>(
             "smartparking.bus.consumer.messages", "{message}", "Stream entries handled by a consumer group, by outcome.");
         groupTag = new("group", options.Group);
+
+        // Review of Phase 3, finding 4: a handler that always throws for one entry blocks the group (by design, a
+        // transient failure is never dead-lettered). These two instruments make that visible in Prometheus.
+        failures = meter.CreateCounter<long>(
+            "smartparking.bus.consumer.failures", "{failure}", "Failed consumer iterations (nothing acknowledged).");
+        meter.CreateObservableGauge(
+            "smartparking.bus.consumer.consecutive_failures",
+            () => new Measurement<int>(Volatile.Read(ref consecutiveFailures), groupTag),
+            "{failure}",
+            "Failures since the last successfully handled batch; grows without bound while the group is blocked.");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // BackgroundService.StartAsync runs ExecuteAsync synchronously up to its first await; yield so that a slow
-        // or unreachable Redis does not delay the start of the host (and of /health).
+        // BackgroundService.StartAsync runs ExecuteAsync synchronously up to its first await; yield so that nothing
+        // below runs inside the host's start. The connection itself is opened asynchronously (RedisBusConnection),
+        // so an unreachable Redis delays only this loop, not the host or /health (review of Phase 3, finding 2).
         await Task.Yield();
 
         var readPending = true;
@@ -77,6 +91,7 @@ public sealed class RedisStreamConsumer<THandler> : BackgroundService
         {
             try
             {
+                var redis = await connection.GetAsync().WaitAsync(stoppingToken).ConfigureAwait(false);
                 var db = redis.GetDatabase();
 
                 if (!groupReady)
@@ -87,7 +102,7 @@ public sealed class RedisStreamConsumer<THandler> : BackgroundService
 
                 if (time.GetUtcNow() >= nextClaim)
                 {
-                    if (await ClaimAbandonedAsync(db).ConfigureAwait(false) > 0)
+                    if (await ClaimAbandonedAsync(db, stoppingToken).ConfigureAwait(false) > 0)
                     {
                         readPending = true;
                     }
@@ -113,6 +128,7 @@ public sealed class RedisStreamConsumer<THandler> : BackgroundService
 
                 await ProcessAsync(db, entries, recovered: readPending, stoppingToken).ConfigureAwait(false);
                 backoff = InitialBackoff;
+                Volatile.Write(ref consecutiveFailures, 0);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -127,6 +143,8 @@ public sealed class RedisStreamConsumer<THandler> : BackgroundService
                 }
 
                 LogFailure(logger, options.Stream, options.Group, backoff, ex);
+                failures.Add(1, groupTag);
+                Interlocked.Increment(ref consecutiveFailures);
                 readPending = true;
 
                 try
@@ -158,12 +176,14 @@ public sealed class RedisStreamConsumer<THandler> : BackgroundService
         }
     }
 
-    private async Task<int> ClaimAbandonedAsync(IDatabase db)
+    private async Task<int> ClaimAbandonedAsync(IDatabase db, CancellationToken cancellationToken)
     {
         var claimed = 0;
         RedisValue start = "0-0";
         do
         {
+            // A large PEL left by a dead consumer takes many pages: honour a shutdown between them (finding 7).
+            cancellationToken.ThrowIfCancellationRequested();
             var result = await db.StreamAutoClaimIdsOnlyAsync(
                 options.Stream,
                 options.Group,
@@ -189,7 +209,7 @@ public sealed class RedisStreamConsumer<THandler> : BackgroundService
     private async Task ProcessAsync(IDatabase db, StreamEntry[] entries, bool recovered, CancellationToken cancellationToken)
     {
         var messages = new List<DeliveredMessage>(entries.Length);
-        var unreadable = new List<StreamEntry>();
+        var unreadable = new HashSet<string>(StringComparer.Ordinal);
         foreach (var entry in entries)
         {
             if (StreamFields.To(entry) is { } message)
@@ -198,7 +218,7 @@ public sealed class RedisStreamConsumer<THandler> : BackgroundService
             }
             else
             {
-                unreadable.Add(entry);
+                unreadable.Add(entry.Id.ToString());
             }
         }
 
@@ -207,15 +227,20 @@ public sealed class RedisStreamConsumer<THandler> : BackgroundService
         var poison = new HashSet<string>(StringComparer.Ordinal);
         if (messages.Count > 0)
         {
-            await using var scope = scopes.CreateAsyncScope();
-            var handler = scope.ServiceProvider.GetRequiredService<THandler>();
-            var outcome = await handler.HandleAsync(messages, cancellationToken).ConfigureAwait(false);
-            poison.UnionWith(outcome.Poison);
+            var scope = scopes.CreateAsyncScope();
+            await using (scope.ConfigureAwait(false))
+            {
+                var handler = scope.ServiceProvider.GetRequiredService<THandler>();
+                var outcome = await handler.HandleAsync(messages, cancellationToken).ConfigureAwait(false);
+                poison.UnionWith(outcome.Poison);
+            }
         }
 
         // Dead-letter first, then acknowledge: a crash in between redelivers the entry, which at worst is copied
         // twice to the dead-letter stream, never lost.
-        foreach (var entry in entries.Where(e => poison.Contains(e.Id.ToString()) || unreadable.Contains(e)))
+        poison.UnionWith(unreadable);
+        var deadLetters = entries.Where(e => poison.Contains(e.Id.ToString())).ToArray();
+        foreach (var entry in deadLetters)
         {
             NameValueEntry[] fields =
             [
@@ -229,7 +254,7 @@ public sealed class RedisStreamConsumer<THandler> : BackgroundService
         var ids = entries.Select(e => e.Id).ToArray();
         await db.StreamAcknowledgeAsync(options.Stream, options.Group, ids).ConfigureAwait(false);
 
-        var deadLettered = poison.Count + unreadable.Count;
+        var deadLettered = deadLetters.Length;
         handled.Add(ids.Length - deadLettered, groupTag, new("outcome", recovered ? "acked_recovered" : "acked"));
         if (deadLettered > 0)
         {

@@ -106,6 +106,75 @@ public sealed class StreamConsumerRecoveryTests(IngestionFixture fixture)
         Assert.Equal(1, await fixture.CountAsync(record.EventId));
     }
 
+    /// <summary>
+    /// Review of Phase 3, finding 4: a handler that always fails blocks the group (a transient failure is never
+    /// dead-lettered, RNF-03), and that must be visible in the metrics, not only in the log.
+    /// </summary>
+    [Fact]
+    public async Task Handler_that_always_fails_keeps_the_entry_pending_and_is_counted_as_failures()
+    {
+        var (stream, group) = NewStream();
+        long failures = 0;
+        int consecutive = 0;
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Name is "smartparking.bus.consumer.failures" or "smartparking.bus.consumer.consecutive_failures")
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+        {
+            if (HasGroup(tags, group))
+            {
+                Interlocked.Add(ref failures, value);
+            }
+        });
+        listener.SetMeasurementEventCallback<int>((instrument, value, tags, _) =>
+        {
+            if (HasGroup(tags, group))
+            {
+                Volatile.Write(ref consecutive, value);
+            }
+        });
+        listener.Start();
+
+        await PublishAsync(stream, Guid.NewGuid());
+        await using var consumer = await fixture.StartConsumerAsync<AlwaysFailingHandler>(o =>
+        {
+            Configure(o, stream, group, "worker-1");
+            o.MaxBackoff = TimeSpan.FromMilliseconds(200);
+        });
+
+        await IngestionFixture.EventuallyAsync(() => Task.FromResult(Interlocked.Read(ref failures) >= 3), "three failures counted");
+        listener.RecordObservableInstruments();
+
+        Assert.True(Volatile.Read(ref consecutive) >= 3, $"consecutive_failures = {consecutive}");
+        Assert.Equal(1, await PendingAsync(stream, group));
+        Assert.Equal(0, await fixture.RedisConnection.GetDatabase().StreamLengthAsync(stream + ":dead"));
+    }
+
+    private static bool HasGroup(ReadOnlySpan<KeyValuePair<string, object?>> tags, string group)
+    {
+        foreach (var tag in tags)
+        {
+            if (tag.Key == "group" && (string?)tag.Value == group)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>A handler with a deterministic bug: it throws for every batch.</summary>
+    public sealed class AlwaysFailingHandler : IMessageBatchHandler
+    {
+        public Task<BatchOutcome> HandleAsync(IReadOnlyList<DeliveredMessage> messages, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Simulated deterministic handler failure.");
+    }
+
     private static (string Stream, string Group) NewStream()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];

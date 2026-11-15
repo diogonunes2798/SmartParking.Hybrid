@@ -70,14 +70,15 @@ public sealed class IngestionFixture : IAsyncLifetime
     /// </summary>
     public async Task<RunningConsumer> StartConsumerAsync<THandler>(
         Action<RedisStreamConsumerOptions> configure,
-        Action<IServiceCollection>? services = null)
+        Action<IServiceCollection>? services = null,
+        string? redisConnectionString = null)
         where THandler : class, IMessageBatchHandler
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             [$"ConnectionStrings:{DocumentsRegistration.ConnectionStringName}"] = Mongo.GetConnectionString(),
-            [$"ConnectionStrings:{CacheRegistration.ConnectionStringName}"] = Redis.GetConnectionString(),
+            [$"ConnectionStrings:{CacheRegistration.ConnectionStringName}"] = redisConnectionString ?? Redis.GetConnectionString(),
         });
 
         builder.Services.AddMetrics();

@@ -51,5 +51,12 @@ public sealed class RedisStreamConsumerOptions
         {
             throw new InvalidOperationException("Stream consumer sizes and intervals must be positive.");
         }
+
+        // Task.Delay rejects very large values, and that exception would escape the loop and stop the host
+        // (review of Phase 3, finding 10).
+        if (MaxBackoff > TimeSpan.FromMinutes(5))
+        {
+            throw new InvalidOperationException("MaxBackoff must not exceed 5 minutes.");
+        }
     }
 }

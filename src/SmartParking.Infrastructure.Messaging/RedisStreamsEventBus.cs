@@ -11,25 +11,29 @@ namespace SmartParking.Infrastructure.Messaging;
 /// The stream is not trimmed here (no <c>MAXLEN</c>): trimming could drop entries a slow consumer group has not
 /// read yet. Retention is Phase 10 (RNF-05).
 /// </summary>
-internal sealed class RedisStreamsEventBus(IConnectionMultiplexer redis) : IEventBus
+internal sealed class RedisStreamsEventBus(RedisBusConnection connection) : IEventBus
 {
     public async Task PublishAsync(string topic, IReadOnlyList<BusMessage> messages, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(topic);
         ArgumentNullException.ThrowIfNull(messages);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var db = redis.GetDatabase();
-        var pending = new Task<RedisValue>[messages.Count];
-        for (var i = 0; i < messages.Count; i++)
-        {
-            pending[i] = db.StreamAddAsync(topic, StreamFields.From(messages[i]));
-        }
-
         try
         {
-            // StackExchange.Redis commands cannot be cancelled once written; WaitAsync only stops waiting.
-            await Task.WhenAll(pending).WaitAsync(cancellationToken).ConfigureAwait(false);
+            // The connection task is shared and cached: abandoning the wait on cancellation leaves nothing unobserved.
+            var redis = await connection.GetAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var db = redis.GetDatabase();
+            var pending = new Task<RedisValue>[messages.Count];
+            for (var i = 0; i < messages.Count; i++)
+            {
+                pending[i] = db.StreamAddAsync(topic, StreamFields.From(messages[i]));
+            }
+
+            // Once sent, XADD cannot be cancelled; wait for every reply (bounded by the client's AsyncTimeout, 5 s)
+            // instead of abandoning the tasks on cancellation, so that no failure goes unobserved and the response
+            // matches what Redis stored (review of Phase 3, finding 6).
+            await Task.WhenAll(pending).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is RedisException or TimeoutException)
         {

@@ -8,12 +8,26 @@ namespace SmartParking.Infrastructure.Cache;
 /// Replaces AspNetCore.HealthChecks.Redis, whose check ignores cancellation and therefore waits for the
 /// client's own 5 s timeout when Redis is down (observed in Phase 1, see docs/DIARIO.md).
 /// </summary>
-internal sealed class RedisHealthCheck(IConnectionMultiplexer connection) : IHealthCheck
+internal sealed class RedisHealthCheck(RedisCacheConnection redis) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(context);
+
+        // The first connection attempt is still running (RedisCacheConnection): report it without waiting.
+        var pending = redis.GetAsync();
+        if (!pending.IsCompletedSuccessfully)
+        {
+            return new HealthCheckResult(
+                context.Registration.FailureStatus,
+                pending.IsFaulted ? "Connection failed." : "Connecting.",
+                pending.Exception);
+        }
+
+        var connection = pending.Result;
+
         // Fast path: no round trip (and no wait) while the multiplexer knows it is disconnected.
         if (!connection.IsConnected)
         {

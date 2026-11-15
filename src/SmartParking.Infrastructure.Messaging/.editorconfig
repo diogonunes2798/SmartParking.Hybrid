@@ -1,0 +1,4 @@
+# Library project (no SynchronizationContext assumptions): every await must say ConfigureAwait(false).
+# Review of Phase 3, finding 5. Hosts (Api, Workers) and tests do not need it (ASP.NET Core has no context).
+[*.cs]
+dotnet_diagnostic.CA2007.severity = warning
