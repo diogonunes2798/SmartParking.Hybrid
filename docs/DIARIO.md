@@ -474,7 +474,7 @@ Relatório completo: `docs/revisoes/fase-2b-revisao-desempenho-bd.md`. Foi feita
 
 - `dotnet build`: sem erros nem avisos (`TreatWarningsAsErrors`).
 - `dotnet test` (solução inteira): **116 testes, 0 falhados** (eram 90 no fim da Fase 2b; mais 26 da Fase 3). Os 26 testes de ingestão foram repetidos mais 3 vezes, sem falhas (cerca de 11 s por execução).
-- Teste manual com o compose, a API (porta 5080) e os Workers (porta 5090), feito pelo Claude Code a 15-11-2026 (`TODO(Diogo):` repetir):
+- Teste manual com o compose, a API (porta 5080) e os Workers (porta 5090), feito pelo Claude Code a 15-11-2026 (a pedido do Diogo, «só desta vez», também a segunda verificação abaixo):
 
   | passo | resultado |
   |---|---|
@@ -488,6 +488,17 @@ Relatório completo: `docs/revisoes/fase-2b-revisao-desempenho-bd.md`. Foi feita
 
   Documento gravado: `eventId: UUID('11111111-…')`, `timestamp: ISODate('2026-11-14T10:00:00.000Z')`, `payload: {}`, `receivedAt` e `storedAt` com 148 ms de diferença (inclui a criação dos índices na primeira gravação). Métricas em `/metrics`: API `smartparking_ingest_events_total{outcome="accepted"} 2`; Workers `smartparking_occupancy_log_events_total{outcome="inserted"} 1` e `{outcome="duplicate"} 1`, `smartparking_bus_consumer_messages_total{outcome="acked"} 2`.
 - A API e os Workers foram parados no fim (lição das Fases 2a e 2b).
+- **Segunda verificação, antes do PR** (pedida pelo Diogo, feita pelo Claude Code): `dotnet build` sem erros nem avisos; `dotnet test` com **116/116** (39 s). Teste manual com um `eventId` novo, porque o `1111…` já estava gravado:
+
+  | passo | `XLEN` | documentos | pendentes |
+  |---|---|---|---|
+  | antes | 2 | 1 | 0 |
+  | `curl` com `eventId` `2222…` e `payload {"temperature":19.5}` → `202` | 3 | 2 | 0 |
+  | o mesmo `curl` → `202` | 4 | **2** | 0 |
+  | lote misto (um válido `3333…`, um inválido `4444…`) → `202`, `rejected` com `index: 1` e os 5 erros | 5 | 3 | 0 |
+  | lote só com `{"eventId":"abc"}` → `400` com `rejected` | 5 | 3 | 0 |
+
+  Consulta por intervalo no `mongosh` (`facilityId` + `timestamp` entre 10:00 e 11:00 UTC, ordenada por `timestamp`): os 3 eventos por ordem, com `timestamp` como `ISODate`. A API e os Workers foram parados no fim.
 - Cada um dos 5 *commits* de código compila sozinho (verificado num *worktree* temporário, *commit* a *commit*): os *commits* foram ordenados por dependência (Application → Messaging → Documents → Api/Workers → testes), como ficou combinado na Fase 2b.
 
 ### Revisão de código assíncrono (passo 5)
@@ -510,4 +521,4 @@ Relatório completo: `docs/revisoes/fase-3-revisao-async.md`. Foi feita por um s
 - **Fase 4:** segundo grupo (`availability`) no mesmo stream; o *read model* tem de comparar `timestamp`, porque com vários consumidores a ordem entre eventos do mesmo lugar não é garantida (ADR-0006).
 - **Fase 9:** custo do *polling* de 100 ms na D7; `XREADGROUP BLOCK` com uma ligação dedicada; `appendfsync` e `j:true` (achado 1); *pool* Npgsql (memória da Fase 2b).
 - **Fase 10:** aparar o stream e a *dead letter*; `_id` = `eventId` e *time series collections* como variantes de armazenamento (ADR-0007).
-- **`TODO(Diogo)`:** comportamento de um lote com inválidos; Redis Streams vs. Kafka (justificação qualitativa ou medição); referências do Cap. 4 para Redis Streams, Kafka e *Event Store*; repetir o teste manual.
+- **`TODO(Diogo)`:** comportamento de um lote com inválidos; Redis Streams vs. Kafka (justificação qualitativa ou medição); referências do Cap. 4 para Redis Streams, Kafka e *Event Store*; achados baixos da revisão async (por decidir).
