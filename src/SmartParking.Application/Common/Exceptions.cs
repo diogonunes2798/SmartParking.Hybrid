@@ -67,3 +67,12 @@ public sealed class ReferentialIntegrityException : ConflictException
     {
     }
 }
+
+/// <summary>The event bus did not accept the messages (HTTP 503: the producer should retry later).</summary>
+public sealed class EventBusUnavailableException : Exception
+{
+    public EventBusUnavailableException(string message, Exception? innerException = null)
+        : base(message, innerException)
+    {
+    }
+}
