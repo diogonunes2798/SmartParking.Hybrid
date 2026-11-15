@@ -33,7 +33,7 @@ public sealed class OccupancyEventLogIndexTests(IngestionFixture fixture)
         var log = fixture.Factory.Services.GetRequiredService<IOccupancyEventLog>();
         var facilityId = Guid.NewGuid();
         var start = new DateTimeOffset(2026, 11, 14, 8, 0, 0, TimeSpan.Zero);
-        // Hours 9, 10 and 8 (a string sort of "…T9…" vs "…T10…" would get this wrong; dates do not).
+        // Inserted out of order (9h, 10h, 8h); the query must return them in time order from the index alone.
         OccupancyEventRecord[] records =
         [
             Record(facilityId, start.AddHours(1)),
