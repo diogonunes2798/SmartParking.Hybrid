@@ -38,21 +38,15 @@ public sealed class Payment : IVersioned
 
     public uint Version { get; private set; }
 
-    public static Payment Register(Guid sessionId, decimal amount, PaymentMethod method, DateTimeOffset timestamp)
-    {
-        if (amount < 0)
-        {
-            throw new DomainValidationException(nameof(amount), "must not be negative");
-        }
-
-        return new Payment
+    /// <summary>Created only by <see cref="ParkingSession.Pay"/>, which checks the session state.</summary>
+    internal static Payment Register(Guid sessionId, decimal amount, PaymentMethod method, DateTimeOffset timestamp) =>
+        new()
         {
             Id = Guid.CreateVersion7(),
             SessionId = Guard.Id(sessionId, nameof(sessionId)),
-            Amount = amount,
+            Amount = Money.Normalise(amount, nameof(amount)),
             Method = Guard.Defined(method, nameof(method)),
             Status = PaymentStatus.Completed,
             Timestamp = Guard.Utc(timestamp),
         };
-    }
 }
