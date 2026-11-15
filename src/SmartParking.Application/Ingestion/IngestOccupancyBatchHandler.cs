@@ -99,7 +99,7 @@ public sealed class IngestOccupancyBatchHandler(
             return new IngestOutcome(null, "No event of the batch was accepted.", rejected);
         }
 
-        await bus.PublishAsync(OccupancyEventMessage.Topic, messages, cancellationToken);
+        await bus.PublishAsync(OccupancyEventMessage.Topic, messages, cancellationToken).ConfigureAwait(false);
 
         return new IngestOutcome(new IngestAccepted(messages.Count, duplicates, rejected), null, rejected);
     }
