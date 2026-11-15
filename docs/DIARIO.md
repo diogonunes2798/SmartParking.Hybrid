@@ -539,3 +539,201 @@ O Diogo pediu para resolver os achados baixos antes de integrar o PR. Foram corr
 - **Fase 9:** custo do *polling* de 100 ms na D7; `XREADGROUP BLOCK` com uma ligação dedicada; `appendfsync` e `j:true` (achado 1); *pool* Npgsql (memória da Fase 2b).
 - **Fase 10:** aparar o stream e a *dead letter*; `_id` = `eventId` e *time series collections* como variantes de armazenamento (ADR-0007).
 - **`TODO(Diogo)`:** comportamento de um lote com inválidos; Redis Streams vs. Kafka (justificação qualitativa ou medição); referências do Cap. 4 para Redis Streams, Kafka e *Event Store*.
+
+## 15-11-2026 — Fase 4: *read model* de disponibilidade (UC-03) em Redis
+
+Âmbito: segundo *consumer group* (`availability`) sobre o stream da Fase 3, que atualiza o estado de cada lugar, os contadores por parque, zona e tipo, e publica em pub/sub; carga inicial e reconstrução a partir do PostgreSQL e do MongoDB; eventos do RF-06 (parques e lugares) para o *read model*; `GET /api/availability`, que lê só do Redis.
+
+### Plano e decisões (antes do código)
+
+- Plano apresentado em texto e aprovado pelo Diogo com as duas opções recomendadas:
+  1. **RF-06 → *read model* pela outbox (opção A).** Os comandos de parque e lugar gravam eventos de estado completo na outbox, na mesma transação. Um projetor aplica-os a partir do tópico `smartparking:configuration-events`. O *relay* da outbox continua na Fase 5. Rejeitou-se antecipar o *relay* (misturava fases) e escrever no Redis a partir da API (escrita dupla, contra o ADR-0004).
+  2. **Lugar sem eventos começa `FREE`.** `TODO(Diogo):` confirmar no Cap. 3.
+- **As três confirmações pedidas:**
+  - atomicidade por *script* Lua (e não `MULTI`, porque a decisão depende do estado lido);
+  - idempotência por `(timestamp, eventId)`;
+  - reconstrução do zero por comando e no arranque.
+- **Numeração:** o guião pedia «ADR 0006», número já ocupado pela D2 desde a Fase 3. Ficou **ADR-0008**. É a segunda fase seguida em que o guião traz um número de ADR desatualizado.
+- **Revisões:** o *plugin* dotnet-ai-toolkit está instalado, mas não está ativo nesta sessão. A `caching-strategy-setup` e o `dotnet-code-reviewer` foram aplicados por dois subagentes separados, que leram o `SKILL.md` e o `.md` do agente.
+
+### O que foi feito
+
+1. **Domain:**
+   - `FacilityChanged`, `FacilityDeleted`, `SpotChanged` e `SpotDeleted` (`Facilities/FacilityEvents.cs`);
+   - `ParkingFacility` e `ParkingSpot` passam a `IHasDomainEvents`;
+   - `Create`/`Update` recebem o instante (`occurredAt`) e `MarkDeleted` regista a remoção;
+   - os comandos do RF-06 recebem `TimeProvider`.
+2. **Application/Availability:**
+   - contratos `IAvailabilityReadModel`, `IAvailabilityQueries` e `IAvailabilitySource`;
+   - `AvailabilityProjector` (UC-01, passo 4) e `ConfigurationProjector` (RF-06);
+   - `ReadModelRebuilder`, `ReadModelGate`, `ReadModelMetrics`, `AvailabilitySearch` (validação) e `ConfigurationEventMessage` (formato da linha da outbox no *bus*);
+   - `IOccupancyEventLog.GetLatestPerSpotAsync`.
+3. **Infrastructure.Cache:** `ReadModelKeys` (prefixo `sp:rm:`), `ReadModelScripts` (cinco *scripts* Lua) e `RedisAvailabilityReadModel` (escrita e consulta).
+4. **Documents e Relational:**
+   - último evento por lugar com `$group` + `$top`;
+   - `EfAvailabilitySource` (leitura em *streaming*, sem *tracking*).
+5. **Workers e Api:**
+   - nos Workers, os grupos `availability` (no stream de ocupação e no de configuração), o `ReadModelInitializer` e o comando `rebuild-read-model`;
+   - na Api, o `AvailabilityEndpoints`.
+6. **Testes (24 novos):**
+   - `ReadModelConsistencyTests` (7);
+   - `AvailabilityQueryTests` (11, contando cada caso da `Theory`);
+   - `ReadModelConfigurationAndRebuildTests` (6);
+   - com um `AvailabilityFixture` próprio (os três motores).
+
+### Como se testou que os testes apanham os erros (mutações)
+
+- **Troca de latitude e longitude no `GEOADD`:** 4 testes falham.
+  - Os parques de teste usam coordenadas reais de Coimbra (aproximadas). A «Portagem» fica a 1 722 m do centro da consulta, mas ficaria a 2 191 m com as coordenadas trocadas, porque a distância este–oeste encolhe com cos(latitude).
+  - Num raio de 2 km, a troca tira-a do resultado. O teste também compara a distância devolvida pelo Redis com a *haversine*, com ±1 %.
+- **Sem a comparação de `ts` no *script*:** 3 testes falham (evento atrasado, concorrência e reconstrução).
+- **Restauro:** os dois ficheiros mutados foram repostos (ver o problema 2).
+
+### Problemas encontrados e tentativas falhadas
+
+1. **Heredoc no Git Bash, quarta fase seguida.** Um comando que escrevia `ReadModelKeys.cs` e `ReadModelScripts.cs` falhou com «unexpected EOF while looking for matching `'`», por causa das plicas do Lua. Nada foi escrito, e os ficheiros foram escritos com as ferramentas de edição. A regra «para código, não usar heredocs» já estava no diário da Fase 3 e não foi seguida.
+2. **Mutação mal reposta.** O guião de mutação repunha o ficheiro com `git checkout`, mas o ficheiro ainda não estava no git. A primeira mutação ficou ativa e a segunda correu por cima dela: o resultado dessa execução (7 falhas) misturava as duas. O ficheiro foi reposto a partir de uma cópia e a segunda mutação foi repetida sozinha (3 falhas). **Lição:** em ficheiros novos, guardar uma cópia antes de mutar.
+3. **Duas instâncias da API no teste manual.** Lancei a API em segundo plano com `&` dentro de uma tarefa já em segundo plano, e depois outra vez. A segunda falhou ao arrancar porque a porta 5080 estava ocupada (código 127). O teste usou a primeira, e as duas foram paradas no fim pelo PID da porta.
+4. **Eventos antigos sem lugar.** Na base de dados de desenvolvimento, os 4 eventos da Fase 3 no MongoDB referem lugares gerados aleatoriamente pelo `curl` dessa fase, que não existem no PostgreSQL. A reconstrução reporta «4 latest events (0 applied)». O comportamento é o esperado (`unknown_spot`), mas convém lembrá-lo nos *benchmarks*: o simulador da Fase 7 tem de usar lugares configurados.
+5. **Um parque criado pela API não aparece sozinho no *read model*.** Como o *relay* da outbox é da Fase 5, o teste manual teve de seguir esta ordem: parar os Workers, criar os parques, correr `rebuild-read-model` e voltar a arrancar os Workers. É o limite assumido no ADR-0008, ponto 4.
+6. **Precisão dos instantes:** o `ts` dos eventos é truncado ao milissegundo (como no MongoDB), para a reconstrução e o caminho incremental compararem os mesmos valores. O `changedAt` da configuração usa microssegundos: criar e atualizar o mesmo lugar no mesmo milissegundo ignoraria a atualização.
+
+### Verificação (resultados reais)
+
+- `dotnet build`: 0 avisos e 0 erros.
+- `dotnet test`: **143/143** (eram 119; mais 24). Arquitetura: passou. Integração: 35 s. Depois da correção dos achados: **151/151**.
+- **Teste manual** (compose em execução; `dotnet ef database update` sem migrações por aplicar):
+  - Arranque dos Workers: «Availability read model rebuilt: 3 facilities, 5 spots, 4 latest events in 1162 ms».
+  - Criados pela API o «Parque da Portagem (manual F4)» (40.2089, −8.4292, 2 lugares) e o «Parque Coimbra-B (manual F4)» (40.2228, −8.4357, 1 lugar), com os Workers parados. `rebuild-read-model`: «5 facilities, 8 spots, 4 latest events (0 applied) in 1499 ms».
+  - `curl "http://localhost:5080/api/availability?lat=40.2033&lon=-8.4103&radius=2000"`: os três parques das Fases 2a/2b no centro e a Portagem a **1721,9 m**, com `spots` 2 e `free` 2. Coimbra-B não aparece.
+  - `redis-cli GEOSEARCH sp:rm:geo:facilities FROMLONLAT -8.4103 40.2033 BYRADIUS 2000 m ASC WITHDIST`: o mesmo resultado. Com 3 500 m, aparece Coimbra-B a **3059,2 m**. Os valores coincidem com a *haversine* calculada à parte (1 722 e 3 059 m).
+  - `redis-cli SUBSCRIBE sp:availability` aberto e um evento `OCCUPIED` enviado para um lugar da Portagem (`202`): chegou **uma** mensagem com `"state":"OCCUPIED","free":1,"freeOfType":1`. O hash do parque ficou com `free 1` e `spots 2`.
+  - O mesmo evento reenviado (`202`): nenhuma mensagem nova e os contadores iguais. Métricas dos Workers: `outcome="applied"} 1` e `outcome="duplicate"} 1`.
+  - `XINFO GROUPS`: os grupos `availability` e `occupancy-log` com `pending 0` e `lag 0`.
+  - `smartparking_read_model_lag_seconds`: uma amostra de 0,32 s. É uma única medição local, sem valor estatístico; a D7 mede-se na Fase 9.
+  - `INFO commandstats`: `eval` 30, `evalsha` 8. O StackExchange.Redis envia `EVAL` na primeira vez de cada *script* em cada processo (incluindo o processo do comando de reconstrução) e `EVALSHA` a seguir.
+
+### Revisões independentes (passo 5)
+
+Dois relatórios, ambos feitos por subagentes separados que não editaram `src/` nem `tests/` e que usaram contentores descartáveis (já apagados):
+- `docs/revisoes/fase-4-revisao-cache.md`: método da `caching-strategy-setup`, adaptado a um *read model* que não é uma cache *cache-aside*;
+- `docs/revisoes/fase-4-revisao-codigo.md`: método do `dotnet-code-reviewer`.
+
+Achados consolidados (os dois relatórios coincidem em três):
+1. **Alta. Duas reconstruções, ou uma reconstrução com projetores ativos, desviam os contadores para sempre.**
+   - Durante o `SCAN`, o `HINCRBY` de um projetor recria o hash do parque com `free = -1`, e esse hash sobrevive à limpeza.
+   - O revisor da cache reproduziu o problema com os *scripts* reais: «expected 3/3, got 3/2».
+   - Acontece com 2 ou mais Workers a arrancar sem `sp:rm:meta` (o RNF-02 mede 2 e 4 instâncias) ou com o comando a correr com os Workers ligados.
+   - A regra «Workers parados» do ADR-0008 não basta, porque nada a impõe.
+2. **Alta. Os histogramas de latência usam os *buckets* por omissão (0, 5, 10… s).** Assim, o p95 da D7 (< 1 s) não se calcula no Prometheus. Afeta também o `occupancy_log.lag` da Fase 3. O revisor confirmou-o com o OTel 1.21.0: amostras de 0,05 a 1,4 s caíram todas em `le=5`.
+3. **Média. A reconstrução ignora o atraso do grupo `occupancy-log`.** Os eventos que `availability` já confirmou, mas que ainda não estão no MongoDB, desaparecem do *read model*.
+4. **Média. Um `timestamp` no futuro congela o lugar.** O RF-01 não tem limite superior, e a reconstrução volta a escolher esse evento. Reproduzido.
+5. **Média. Não há marca de remoção (*tombstone*).** Com dois consumidores no grupo de configuração, `SpotChanged` depois de `SpotDeleted` recria o lugar. Reproduzido. O ADR-0008 dizia que isto «só existe com reentregas», o que estava errado.
+6. **Baixas:**
+   - evento antes do `SpotChanged` → `unknown_spot` perdido;
+   - UC-03 responde 200 vazio durante uma reconstrução;
+   - `noeviction` só implícito e stream sem limite;
+   - `ClearAsync` silencioso sem primário ligado, e o ADR fala em `UNLINK` mas o código usa `DEL`;
+   - grupo de configuração com o mesmo nome (`availability`), o que mistura métricas e esconde um projetor bloqueado (confirmado);
+   - *payload* desserializável mas inválido (por exemplo, latitude 89) deixa uma escrita a meio (reproduzido);
+   - a gate fechada não aparece na prontidão;
+   - lacunas nos testes (initializer, remoções pela outbox, `DeleteFacility`, *poison* de configuração) e `Random.Shared` num teste dito reproduzível.
+7. **Informativas:**
+   - ordem da configuração dependente dos relógios de várias instâncias da API;
+   - Redis Cluster (`CROSSSLOT` no `DEL` multi-chave);
+   - rajada de pub/sub na reconstrução;
+   - hashes de zona nunca removidos;
+   - título errado no 400 de um parâmetro de *query*;
+   - tarefas abandonadas em `InChunksAsync`;
+   - `lag` negativo com sensores adiantados.
+
+Verificado sem problemas pelos revisores:
+- `XACK` só depois dos *scripts*;
+- atomicidade com vários projetores (50 parques sem diferença);
+- desempate `(ts, eventId)` igual no Lua e no `$top` do MongoDB;
+- `FacilityDeleted` gravado na mesma transação do `Remove` (PostgreSQL descartável);
+- mudança de zona;
+- ordem longitude/latitude;
+- regras de camadas;
+- paragem limpa com a gate fechada.
+
+Estado: corrigidos os achados 1 a 5 e três baixos (ver a secção seguinte).
+
+### Correção dos achados da revisão (antes dos commits)
+
+O Diogo aprovou o conjunto recomendado: os 5 achados altos e médios e três baixos. Todos têm um teste novo, em `ReadModelReviewFixesTests` (8 testes):
+
+1. **Trinco e barreira na reconstrução (alto, achado 1).**
+   - **O que mudou:**
+     - `SET sp:rebuild-lock <token> NX PX 120000`, fora do prefixo `sp:rm:`;
+     - os cinco *scripts* recebem a chave do trinco e um *token*, e devolvem 6 a quem não o tem;
+     - o código 6 vira `ReadModelRebuildingException`: falha transitória, sem `XACK`;
+     - `IReadModelRebuildSession` é o único escritor durante a reconstrução, e renova e liberta o trinco;
+     - `RebuildInProgressException` para uma segunda reconstrução. O `ReadModelInitializer` espera e volta a verificar, e o comando sai com o código 1.
+   - **Testes:**
+     - `Rebuild_lock_refuses_projector_writes_and_a_second_rebuild`;
+     - `Concurrent_rebuilds_and_projector_leave_counters_equal_to_spot_states`: duas reconstruções e um projetor a escrever ao mesmo tempo.
+   - **Verificação manual:** dois `rebuild-read-model` em simultâneo; um terminou e o outro saiu com «Another rebuild … in progress» e o código 1.
+2. ***Buckets* dos histogramas de latência (alto, achado 1 do código).**
+   - **O que mudou:** *buckets* explícitos de 5 ms a 60 s para `smartparking.read_model.lag`, `bus_lag` e `occupancy_log.lag` (este último da Fase 3), e outros para a duração da reconstrução.
+   - **Teste:** `Pipeline_lag_histograms_have_sub_second_buckets`.
+3. **Reconstrução alinhada com o grupo `occupancy-log` (médio, achado 2).**
+   - **O que mudou:**
+     - nova abstração `IConsumerGroupPositions` (Application) e `RedisConsumerGroupPositions` (Messaging);
+     - a reconstrução regista até onde o log está completo e, no fim, faz `XGROUP SETID availability` para essa posição.
+   - **Teste:** `Rebuild_redelivers_to_the_projector_what_the_log_does_not_have_yet`. O grupo `availability` confirma à mão um evento que não está no MongoDB; depois da reconstrução e do arranque dos Workers, o lugar fica `OCCUPIED`.
+4. **Timestamps no futuro (médio, achado 3 da cache).**
+   - **O que mudou:** o RF-01 recusa um `timestamp` posterior à receção mais `Ingestion:MaxClockSkew` (5 min por omissão). `TODO(Diogo):` confirmar a tolerância.
+   - **Teste:** `Sensor_timestamp_in_the_future_is_rejected` (+1 h → 400; +1 min → 202).
+5. **Marcas de remoção (médio, achado 2 do código).**
+   - **O que mudou:**
+     - `DeleteSpot` e `DeleteFacility` deixam a chave só com `deleted` e `changedAt`, com uma expiração de 24 h;
+     - `UpsertSpot` e `UpsertFacility` tratam como antigo um evento não mais recente do que a remoção;
+     - um lugar novo num parque removido é ignorado.
+   - **Testes:** `Late_spot_change_after_its_delete_is_stale_and_does_not_resurrect_it` e `Late_facility_change_after_its_delete_is_stale_and_its_late_spots_are_ignored`.
+6. **Baixos:**
+   - o grupo de configuração passa a chamar-se `availability-configuration` (verificado em `New_facility_and_spot_reach_the_read_model_through_the_outbox`);
+   - payload desserializável mas inválido:
+     - o `ConfigurationProjector` aplica as regras do domínio e manda para a *dead letter*;
+     - o `GEOADD` passou para a primeira escrita do *script*;
+     - teste: `Invalid_facility_event_is_poison_and_writes_nothing`, com latitude 89;
+   - `--maxmemory-policy noeviction` explícito no compose (verificado com `CONFIG GET` depois de recriar o contentor);
+   - a limpeza usa `UNLINK` de facto e falha se não houver um primário ligado;
+   - a semente fixa no teste de concorrência deixou de usar `Random.Shared`.
+7. **Não corrigidos (documentados):**
+   - `unknown_spot` antes do `SpotChanged` (Fase 5: medir com o *relay*);
+   - UC-03 vazio durante uma reconstrução (Fase 9);
+   - gate fechada invisível na prontidão;
+   - lacunas de testes do *initializer*;
+   - informativos (relógios de várias instâncias da API, Redis Cluster, rajada de pub/sub, hashes de zona, título do 400 de *query*).
+
+**Mutações** (com uma cópia de cada ficheiro guardada antes, por causa da lição do problema 2):
+- **sem a barreira nos *scripts*:** falha `Rebuild_lock_refuses_projector_writes_and_a_second_rebuild`. O teste de concorrência **não** falhou nessa execução: depende do entrelaçamento, por isso o teste determinista é o que protege a barreira;
+- **sem o `SetPosition`:** falha `Rebuild_redelivers_…`. Uma primeira tentativa desta mutação não compilou, e os testes correram sobre o binário anterior; repetiu-se com uma alteração que compila;
+- **sem a verificação da marca de remoção do lugar:** falha `Late_spot_change_…`.
+
+**Problemas desta correção:**
+1. **Erro real encontrado pelos testes.** O `XGROUP SETID` sobre um stream que ainda não existe devolve «The XGROUP subcommand requires the key to exist» (Redis 7.4), e não `NOGROUP`, por isso não era tratado. Agora cria o grupo com `MKSTREAM`.
+2. **`INFO` precisa de `allowAdmin`** na ligação do teste, para contar as chamadas a `UNLINK`.
+3. **Heredoc outra vez** ao editar o ADR (plicas no texto em português). O script Python passou a ser escrito num ficheiro do scratchpad.
+
+**Verificação:**
+- `dotnet build`: 0 avisos;
+- `dotnet test`: **151/151** (mais 8);
+- ao recriar o contentor do Redis, os dados mantiveram-se (AOF);
+- o comando de reconstrução reporta «5 latest events (1 applied)»: o evento do teste manual, agora reaplicado;
+- os grupos `availability` e `occupancy-log` ficaram com o mesmo `last-delivered-id`.
+
+
+### Pontos a levar para a próxima fase
+
+- **Fase 5:**
+  - o *relay* da outbox publica `FacilityChanged`/`FacilityDeleted`/`SpotChanged`/`SpotDeleted` em `smartparking:configuration-events`, com o formato de `ConfigurationEventMessage`: a linha da outbox tal como está;
+  - depois disso, um parque criado pela API aparece no *read model* sem reconstrução;
+  - os eventos de sessão (UC-02) precisam de outro tópico ou são ignorados pelo `ConfigurationProjector` (já os reconhece como `ignored`).
+- **Fase 9:**
+  - p95 do UC-03 (`availability-read`);
+  - D7 com `smartparking.read_model.lag`;
+  - duração da reconstrução com 5 000 lugares e 10⁶ eventos (custo do *collection scan* do `$group`);
+  - variante «SET de livres» se os contadores mostrarem problemas.
+- **`TODO(Diogo)`:** lugar sem leitura = livre? Raio máximo de 50 km.
