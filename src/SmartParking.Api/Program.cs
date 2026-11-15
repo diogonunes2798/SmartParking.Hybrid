@@ -52,6 +52,7 @@ app.MapDefaultEndpoints();
 app.MapConfigurationEndpoints();
 app.MapSessionEndpoints();
 app.MapIngestionEndpoints();
+app.MapAvailabilityEndpoints();
 
 await app.RunAsync();
 

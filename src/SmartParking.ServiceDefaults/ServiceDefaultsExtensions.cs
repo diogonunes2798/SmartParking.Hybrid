@@ -41,6 +41,24 @@ public static class ServiceDefaultsExtensions
         1, 1.5, 2, 2.5, 5, 10,
     ];
 
+    /// <summary>
+    /// Histogram boundaries (seconds) for the pipeline lags of UC-01 (D7, RNF-01: &lt; 1 s p95): fine between 50 ms and
+    /// 1 s, coarser up to a minute (recoveries). The default OpenTelemetry boundaries (0, 5, 10, … s) put every
+    /// sub-second sample in one bucket, so the p95 could not be computed (review of Phase 4, code finding 1).
+    /// </summary>
+    public static double[] PipelineLagBucketsSeconds { get; } =
+    [
+        0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,
+        1, 1.25, 1.5, 2, 3, 5, 10, 30, 60,
+    ];
+
+    /// <summary>Histogram boundaries (seconds) for a full read model rebuild (ADR-0008).</summary>
+    public static double[] RebuildDurationBucketsSeconds { get; } = [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600];
+
+    /// <summary>Histograms of the SmartParking meter that measure pipeline lag (D7).</summary>
+    public static IReadOnlyList<string> PipelineLagInstruments { get; } =
+        ["smartparking.occupancy_log.lag", "smartparking.read_model.lag", "smartparking.read_model.bus_lag"];
+
     // Instrumentation names emitted natively by Npgsql and EF Core (System.Diagnostics), referenced by name so
     // that ServiceDefaults does not depend on storage drivers (ADR-0001).
     private const string NpgsqlInstrumentationName = "Npgsql";
@@ -82,6 +100,13 @@ public static class ServiceDefaultsExtensions
                 .AddView("http.server.request.duration", new ExplicitBucketHistogramConfiguration
                 {
                     Boundaries = HttpLatencyBucketsSeconds,
+                })
+                .AddView(instrument => PipelineLagInstruments.Contains(instrument.Name)
+                    ? new ExplicitBucketHistogramConfiguration { Boundaries = PipelineLagBucketsSeconds }
+                    : null)
+                .AddView("smartparking.read_model.rebuild.duration", new ExplicitBucketHistogramConfiguration
+                {
+                    Boundaries = RebuildDurationBucketsSeconds,
                 })
                 .AddPrometheusExporter());
 

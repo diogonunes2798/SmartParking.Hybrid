@@ -8,7 +8,8 @@ namespace SmartParking.Application.Configuration;
 
 // Command side of RF-06 (CQRS, ADR-0001: plain handler classes, no mediator). One handler per resource,
 // each with its create/update/delete commands; reads go through IConfigurationQueries.
-// TODO(Phase 2b/5): relevant changes must emit events for the read model (spec §4, RF-06) through the outbox.
+// Facility and spot changes raise domain events (FacilityChanged, SpotChanged, …) that the outbox interceptor writes
+// in the same transaction (ADR-0004); the relay of Phase 5 publishes them to the read model (Phase 4, ADR-0008).
 
 internal static class Concurrency // shared with the UC-02 handlers (same assembly)
 {
@@ -26,7 +27,7 @@ internal static class Concurrency // shared with the UC-02 handlers (same assemb
     }
 }
 
-public sealed class FacilityCommands(IRepository<ParkingFacility> facilities, IUnitOfWork unitOfWork)
+public sealed class FacilityCommands(IRepository<ParkingFacility> facilities, IUnitOfWork unitOfWork, TimeProvider time)
 {
     private const string Resource = "Facility";
 
@@ -34,7 +35,8 @@ public sealed class FacilityCommands(IRepository<ParkingFacility> facilities, IU
     {
         ArgumentNullException.ThrowIfNull(command);
         var facility = ParkingFacility.Create(
-            command.Name, RequireLocation(command.Location), command.Capacity, command.Type, command.Operator, command.Zone);
+            command.Name, RequireLocation(command.Location), command.Capacity, command.Type, command.Operator, command.Zone,
+            time.GetUtcNow());
         facilities.Add(facility);
         await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return FacilityDto.From(facility);
@@ -46,7 +48,8 @@ public sealed class FacilityCommands(IRepository<ParkingFacility> facilities, IU
         var facility = await facilities.GetAsync(id, cancellationToken).ConfigureAwait(false) ?? throw new NotFoundException(Resource, id);
         Concurrency.EnsureVersion(facility, command.Version, Resource);
         facility.Update(
-            command.Name, RequireLocation(command.Location), command.Capacity, command.Type, command.Operator, command.Zone);
+            command.Name, RequireLocation(command.Location), command.Capacity, command.Type, command.Operator, command.Zone,
+            time.GetUtcNow());
         await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return FacilityDto.From(facility);
     }
@@ -54,6 +57,7 @@ public sealed class FacilityCommands(IRepository<ParkingFacility> facilities, IU
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
         var facility = await facilities.GetAsync(id, cancellationToken).ConfigureAwait(false) ?? throw new NotFoundException(Resource, id);
+        facility.MarkDeleted(time.GetUtcNow());
         facilities.Remove(facility);
         await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -63,7 +67,7 @@ public sealed class FacilityCommands(IRepository<ParkingFacility> facilities, IU
 }
 
 public sealed class SpotCommands(
-    IRepository<ParkingSpot> spots, IRepository<ParkingFacility> facilities, IUnitOfWork unitOfWork)
+    IRepository<ParkingSpot> spots, IRepository<ParkingFacility> facilities, IUnitOfWork unitOfWork, TimeProvider time)
 {
     private const string Resource = "Spot";
 
@@ -75,7 +79,7 @@ public sealed class SpotCommands(
             throw new NotFoundException("Facility", facilityId);
         }
 
-        var spot = ParkingSpot.Create(facilityId, command.Code, command.AllowedVehicleType);
+        var spot = ParkingSpot.Create(facilityId, command.Code, command.AllowedVehicleType, time.GetUtcNow());
         spots.Add(spot);
         await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return SpotDto.From(spot);
@@ -86,7 +90,7 @@ public sealed class SpotCommands(
         ArgumentNullException.ThrowIfNull(command);
         var spot = await spots.GetAsync(id, cancellationToken).ConfigureAwait(false) ?? throw new NotFoundException(Resource, id);
         Concurrency.EnsureVersion(spot, command.Version, Resource);
-        spot.Update(command.Code, command.AllowedVehicleType);
+        spot.Update(command.Code, command.AllowedVehicleType, time.GetUtcNow());
         await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return SpotDto.From(spot);
     }
@@ -94,6 +98,7 @@ public sealed class SpotCommands(
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
         var spot = await spots.GetAsync(id, cancellationToken).ConfigureAwait(false) ?? throw new NotFoundException(Resource, id);
+        spot.MarkDeleted(time.GetUtcNow());
         spots.Remove(spot);
         await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }

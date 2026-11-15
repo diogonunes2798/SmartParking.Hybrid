@@ -45,7 +45,10 @@ services:
   redis:
     image: redis:7.4.12-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
     # AOF persistence so that the read model survives a container restart (RNF-03 scenario).
-    command: ["redis-server", "--appendonly", "yes"]
+    # noeviction stated explicitly (it is also Redis' default): an evicted read model key would make the counters
+    # drift silently, and an evicted stream would lose events. With a memory limit, writes fail loudly instead
+    # (ADR-0008; review of Phase 4, cache finding 6).
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:

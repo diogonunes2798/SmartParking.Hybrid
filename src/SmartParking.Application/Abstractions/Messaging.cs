@@ -41,3 +41,24 @@ public sealed record BatchOutcome(IReadOnlyList<string> Poison)
 {
     public static BatchOutcome AllProcessed { get; } = new([]);
 }
+
+/// <summary>
+/// Positions of consumer groups on a topic (D2). Used by the read model rebuild (review of Phase 4, finding 2): the
+/// rebuild reads the log written by one group and must restart another group from where that log is complete, so
+/// that nothing acknowledged by the second group is missing from the rebuilt state.
+/// </summary>
+public interface IConsumerGroupPositions
+{
+    /// <summary>
+    /// A position such that every message up to it (inclusive) has been acknowledged by <paramref name="group"/>:
+    /// just before its oldest pending message, or its last delivered one if nothing is pending. The start of the
+    /// topic if the group or the topic does not exist.
+    /// </summary>
+    Task<string> GetAcknowledgedPositionAsync(string topic, string group, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Makes <paramref name="group"/> deliver again every message after <paramref name="position"/> (creates the group
+    /// there if missing). Its pending messages stay pending and are redelivered as usual.
+    /// </summary>
+    Task SetPositionAsync(string topic, string group, string position, CancellationToken cancellationToken);
+}

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -10,7 +11,8 @@ namespace SmartParking.Application.Ingestion;
 /// <list type="bullet">
 /// <item><c>eventId</c>, <c>sensorId</c>, <c>spotId</c>, <c>facilityId</c>: non-empty GUID strings;</item>
 /// <item><c>type</c>: exactly <c>OCCUPIED</c> or <c>FREED</c>;</item>
-/// <item><c>timestamp</c>: ISO 8601 with an explicit offset (<c>Z</c> or <c>±hh:mm</c>); a local time is ambiguous;</item>
+/// <item><c>timestamp</c>: ISO 8601 with an explicit offset (<c>Z</c> or <c>±hh:mm</c>); a local time is ambiguous.
+/// Not later than the reception plus <see cref="IngestionSettings.MaxClockSkew"/> (Phase 4);</item>
 /// <item><c>payload</c>: a JSON object, or absent (stored as <c>{}</c>). Its content is not validated (UC-05).</item>
 /// </list>
 /// Other top-level properties are ignored: extension data belongs in <c>payload</c>.
@@ -22,7 +24,12 @@ public static partial class OccupancyEventValidator
     private static readonly JsonElement EmptyPayload = JsonDocument.Parse("{}").RootElement.Clone();
 
     /// <summary>Returns the bus message, or null with the reasons in <paramref name="errors"/>.</summary>
-    public static OccupancyEventMessage? Validate(JsonElement item, DateTimeOffset receivedAt, out IReadOnlyList<string> errors)
+    public static OccupancyEventMessage? Validate(JsonElement item, DateTimeOffset receivedAt, out IReadOnlyList<string> errors) =>
+        Validate(item, receivedAt, new IngestionSettings().MaxClockSkew, out errors);
+
+    /// <param name="maxClockSkew">How far after <paramref name="receivedAt"/> the sensor timestamp may be.</param>
+    public static OccupancyEventMessage? Validate(
+        JsonElement item, DateTimeOffset receivedAt, TimeSpan maxClockSkew, out IReadOnlyList<string> errors)
     {
         var problems = new List<string>();
         errors = problems;
@@ -40,6 +47,12 @@ public static partial class OccupancyEventValidator
         var type = RequiredType(item, problems);
         var timestamp = RequiredTimestamp(item, problems);
         var payload = OptionalPayload(item, problems);
+        if (timestamp != default && timestamp > receivedAt + maxClockSkew)
+        {
+            problems.Add(string.Create(
+                CultureInfo.InvariantCulture,
+                $"'timestamp' is more than {maxClockSkew.TotalSeconds:F0} s in the future (sensor clock ahead of the server)."));
+        }
 
         return problems.Count == 0
             ? new OccupancyEventMessage(eventId, sensorId, spotId, facilityId, type!, timestamp, payload, receivedAt)
