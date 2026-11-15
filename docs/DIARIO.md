@@ -375,12 +375,26 @@ Relatório completo: `docs/revisoes/fase-2a-revisao-independente.md`. Foi feita 
 - `dotnet test`: **90/90** em 37,2 s (Api.IntegrationTests e ArchitectureTests). Os testes novos passaram à primeira execução. O facto de os testes de atomicidade receberem 500 confirma que o *trigger* disparou.
 - `dotnet ef migrations add AddOutbox` → migração só com `outbox_messages` e o índice parcial (nenhuma alteração inesperada ao resto do esquema).
 - `dotnet ef database update` (base de dados do compose): `20261115145043_AddOutbox` aplicada. O `\d outbox_messages` confirma as seis colunas, `processed_at` nula e o índice `ix_outbox_messages_unprocessed ... WHERE processed_at IS NULL`; 0 linhas.
-- `TODO(Diogo):` teste manual no Swagger (passo 5 do fluxo). A sessão não o fez de propósito, para que a outbox da base de dados do compose mostre só os 3 eventos desse teste. Sequência:
-  1. `POST /api/tariffs` (zona `Centro`, `validFrom` no passado, regras por exemplo `{"hourlyRate":1.2,"freeMinutes":0}`);
-  2. `POST /api/facilities` (zona `Centro`) e `POST /api/facilities/{id}/spots`;
-  3. `POST /api/users` e `POST /api/users/{id}/vehicles`;
-  4. `POST /api/sessions`, `POST /api/sessions/{id}/close` (corpo vazio ou `{}`) e `POST /api/sessions/{id}/pay` (`{"method":"Card"}`);
-  5. `docker compose exec postgres psql -U smartparking -d smartparking -c "select type, occurred_at, processed_at from outbox_messages order by occurred_at;"` → 3 linhas, com `processed_at` vazio.
+- **Teste manual no Swagger (passo 5).** Desta vez, a pedido do Diogo, foi feito pela sessão, no *browser* integrado, contra o compose (API em `localhost:5080`, `/health/ready` com os três motores *Healthy*):
+  1. dados prévios por HTTP (`curl`): tarifário da zona `Centro` (1,20 €/h, sem minutos grátis nem teto), parque «Parque Swagger 2b» na zona `Centro`, lugar `A-01`, utilizador e veículo → todos 201;
+  2. no Swagger UI («Try it out»): `POST /api/sessions` → **201**, `status: Open`; `POST /api/sessions/{id}/close` com `{}` → **200**, `status: Closed`, `cost: 0.02` (18 s → 1 minuto iniciado × 1,20 €/60); `POST /api/sessions/{id}/pay` com `{"method":"Card"}` → **201**, `amount: 0.02`, `status: Completed`;
+  3. `psql`:
+
+     ```
+            type        |          occurred_at          | processed_at
+     -------------------+-------------------------------+--------------
+      SessionStarted    | 2026-11-15 15:24:27.558158+00 |
+      SessionClosed     | 2026-11-15 15:24:45.933095+00 |
+      PaymentRegistered | 2026-11-15 15:25:01.136866+00 |
+     (3 rows)
+     ```
+
+     Os *payloads* só têm identificadores, instantes e montantes (nem utilizador, nem veículo). O `audit_log` tem 4 linhas para esta sessão: `ParkingSession` Created, Updated, Updated e `Payment` Created; nenhuma da outbox.
+  4. A API foi parada no fim.
+- **Observações do teste manual:**
+  - o exemplo gerado pelo Swagger para o `pay` traz `"version": 0`. Enviado tal como está, dá 409 (versão desatualizada), o que pode confundir quem testa. Retirou-se o campo. `TODO(Diogo):` decidir se se documenta o campo como opcional no OpenAPI ou se fica assim;
+  - o exemplo do `close` traz o corpo `null`, que também é aceite;
+  - o *payload* inclui `aggregateId`, que repete `sessionId` (a propriedade calculada de `IDomainEvent` é serializada). É inofensivo, mas redundante; pode ser retirado na Fase 5, quando o formato dos eventos for fixado com o consumidor.
 
 ### Revisão de desempenho de BD (passo 6)
 
