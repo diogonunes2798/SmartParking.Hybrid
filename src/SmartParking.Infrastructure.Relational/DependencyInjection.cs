@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using SmartParking.Application.Abstractions;
+using SmartParking.Application.Availability;
 using SmartParking.Application.Configuration;
 using SmartParking.Application.Sessions;
 using SmartParking.Domain.Facilities;
@@ -71,6 +72,7 @@ public static class DependencyInjection
         services.AddScoped<IParkingSessionRepository, EfParkingSessionRepository>();
         services.AddScoped<ITariffLookup, EfTariffLookup>();
         services.AddScoped<IConfigurationQueries, EfConfigurationQueries>();
+        services.AddScoped<IAvailabilitySource, EfAvailabilitySource>(); // read model rebuild (Phase 4, ADR-0008)
         services.AddScoped<ISessionQueries, EfSessionQueries>();
 
         services.AddHealthChecks()

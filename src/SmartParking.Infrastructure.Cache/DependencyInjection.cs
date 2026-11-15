@@ -1,12 +1,15 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using SmartParking.Application.Availability;
+using SmartParking.Infrastructure.Cache.Availability;
 using StackExchange.Redis;
 
 namespace SmartParking.Infrastructure.Cache;
 
 /// <summary>
-/// Registers the in-memory key-value sub-layer (Redis). Phase 1: connection and readiness check only;
-/// the availability read model (UC-03) arrives in Phase 4.
+/// Registers the in-memory key-value sub-layer (Redis): connection, readiness check (Phase 1) and the availability
+/// read model (UC-03, RF-03, Phase 4, ADR-0008), both its write side (projectors) and its query side (API).
 /// </summary>
 public static class DependencyInjection
 {
@@ -32,6 +35,11 @@ public static class DependencyInjection
         // Opened asynchronously (RedisCacheConnection): neither the host start nor the readiness probe waits for it.
         services.AddSingleton(_ => new RedisCacheConnection(options));
         services.AddHostedService<RedisConnectionWarmup>();
+
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<RedisAvailabilityReadModel>();
+        services.AddSingleton<IAvailabilityReadModel>(sp => sp.GetRequiredService<RedisAvailabilityReadModel>());
+        services.AddSingleton<IAvailabilityQueries>(sp => sp.GetRequiredService<RedisAvailabilityReadModel>());
 
         services.AddHealthChecks()
             .AddCheck<RedisHealthCheck>(

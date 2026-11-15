@@ -39,6 +39,7 @@ public static class DependencyInjection
 
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IEventBus, RedisStreamsEventBus>();
+        services.TryAddSingleton<IConsumerGroupPositions, RedisConsumerGroupPositions>(); // read model rebuild (ADR-0008)
         return services;
     }
 
