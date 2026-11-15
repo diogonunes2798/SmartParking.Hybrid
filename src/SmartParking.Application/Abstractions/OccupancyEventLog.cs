@@ -22,9 +22,12 @@ public sealed record OccupancyEventRecord(
 /// refused for a reason that will not change on retry (e.g. a field name the engine does not accept in
 /// <c>payload</c>). Transient failures are thrown instead, so that the caller retries the whole batch.
 /// </summary>
-public sealed record AppendResult(int Inserted, int Duplicates, IReadOnlyList<Guid> Refused)
+public sealed record AppendResult(int Inserted, IReadOnlyList<Guid> DuplicateIds, IReadOnlyList<Guid> Refused)
 {
-    public static AppendResult Empty { get; } = new(0, 0, []);
+    public static AppendResult Empty { get; } = new(0, [], []);
+
+    /// <summary>Records that were already in the log (redeliveries, repeated requests).</summary>
+    public int Duplicates => DuplicateIds.Count;
 }
 
 /// <summary>

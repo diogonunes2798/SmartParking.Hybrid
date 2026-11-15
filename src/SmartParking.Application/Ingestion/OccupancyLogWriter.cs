@@ -22,18 +22,22 @@ public sealed class OccupancyLogWriter(
         var records = new List<OccupancyEventRecord>(messages.Count);
         var messageIds = new Dictionary<Guid, List<string>>();
         var poison = new List<string>();
+        var repeatsInRead = 0;
 
         foreach (var delivered in messages)
         {
             if (OccupancyEventMessage.TryParse(delivered.Message.Body) is { } m)
             {
-                // The same event may appear twice in one read (repeated request); both entries map to it.
-                if (!messageIds.TryGetValue(m.EventId, out var ids))
+                // The same event may appear twice in one read (repeated request): both entries map to one record,
+                // so the log sees each eventId once per batch and the extra copy counts as a duplicate.
+                if (messageIds.TryGetValue(m.EventId, out var ids))
                 {
-                    messageIds[m.EventId] = ids = [];
+                    ids.Add(delivered.Id);
+                    repeatsInRead++;
+                    continue;
                 }
 
-                ids.Add(delivered.Id);
+                messageIds[m.EventId] = [delivered.Id];
                 records.Add(new OccupancyEventRecord(
                     m.EventId,
                     m.SensorId,
@@ -54,15 +58,19 @@ public sealed class OccupancyLogWriter(
             ? await log.AppendAsync(records, cancellationToken).ConfigureAwait(false)
             : AppendResult.Empty;
 
-        poison.AddRange(result.Refused.SelectMany(id => messageIds.TryGetValue(id, out var ids) ? ids : []));
+        // One record per eventId, so each refused event maps once to all its entries (review of Phase 3, finding 9).
+        poison.AddRange(result.Refused.SelectMany(id => messageIds[id]));
 
+        // Lag only for the events written now: a redelivered duplicate after a recovery would add minutes to the
+        // histogram for a write that happened earlier and distort the D7 measurement (finding 9).
+        var notWritten = result.DuplicateIds.Concat(result.Refused).ToHashSet();
         var now = time.GetUtcNow();
-        foreach (var record in records)
+        foreach (var record in records.Where(r => !notWritten.Contains(r.EventId)))
         {
             metrics.LogLag(now - record.ReceivedAt);
         }
 
-        metrics.Logged(result.Inserted, result.Duplicates, poison.Count);
+        metrics.Logged(result.Inserted, result.Duplicates + repeatsInRead, poison.Count);
         return poison.Count == 0 ? BatchOutcome.AllProcessed : new BatchOutcome(poison);
     }
 }

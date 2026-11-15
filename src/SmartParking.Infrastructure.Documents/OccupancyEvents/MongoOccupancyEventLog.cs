@@ -60,7 +60,7 @@ public sealed class MongoOccupancyEventLog(IMongoDatabase database, TimeProvider
 
         if (documents.Count == 0)
         {
-            return new AppendResult(0, 0, refused);
+            return new AppendResult(0, [], refused);
         }
 
         try
@@ -68,16 +68,22 @@ public sealed class MongoOccupancyEventLog(IMongoDatabase database, TimeProvider
             // Unordered: one duplicate does not stop the other inserts of the batch.
             await collection.InsertManyAsync(documents, new InsertManyOptions { IsOrdered = false }, cancellationToken)
                 .ConfigureAwait(false);
-            return new AppendResult(documents.Count, 0, refused);
+            return new AppendResult(documents.Count, [], refused);
         }
-        catch (MongoBulkWriteException<BsonDocument> ex) when (ex.WriteConcernError is null)
+        catch (MongoBulkWriteException<BsonDocument> ex)
+            when (ex.WriteConcernError is null && !ex.WriteErrors.Any(e => e.Category == ServerErrorCategory.ExecutionTimeout))
         {
-            // Document-level write errors are deterministic for that document; transient failures (network,
-            // primary step-down, write concern) surface as other exceptions and are rethrown for a retry.
-            var duplicates = ex.WriteErrors.Count(e => e.Code == DuplicateKeyCode);
+            // Document-level write errors are deterministic for that document, except ExecutionTimeout (review of
+            // Phase 3, finding 3): with one of those the exception propagates and the whole batch is retried, which
+            // the unique index makes safe. Transient failures (network, primary step-down, write concern) surface
+            // as other exceptions and are rethrown for a retry as well.
+            var duplicates = ex.WriteErrors
+                .Where(e => e.Category == ServerErrorCategory.DuplicateKey || e.Code == DuplicateKeyCode)
+                .Select(e => EventId(documents[e.Index]))
+                .ToList();
             refused.AddRange(ex.WriteErrors
-                .Where(e => e.Code != DuplicateKeyCode)
-                .Select(e => documents[e.Index]["eventId"].AsGuid));
+                .Where(e => e.Category != ServerErrorCategory.DuplicateKey && e.Code != DuplicateKeyCode)
+                .Select(e => EventId(documents[e.Index])));
 
             return new AppendResult(documents.Count - ex.WriteErrors.Count, duplicates, refused);
         }
@@ -143,6 +149,8 @@ public sealed class MongoOccupancyEventLog(IMongoDatabase database, TimeProvider
     }
 
     private static BsonBinaryData Uuid(Guid value) => new(value, GuidRepresentation.Standard);
+
+    private static Guid EventId(BsonDocument document) => document["eventId"].AsBsonBinaryData.ToGuid(GuidRepresentation.Standard);
 
     public void Dispose() => indexLock.Dispose();
 }
