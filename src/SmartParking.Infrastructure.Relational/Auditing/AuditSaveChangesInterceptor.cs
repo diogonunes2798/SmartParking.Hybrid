@@ -44,7 +44,7 @@ public sealed class AuditSaveChangesInterceptor(ICurrentActor actor, TimeProvide
         var now = timeProvider.GetUtcNow();
 
         var entries = context.ChangeTracker.Entries()
-            .Where(e => e.Entity is not AuditEntry
+            .Where(e => e.Entity is not (AuditEntry or Outbox.OutboxMessage) // the event is the record itself
                 && e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
             .Select(e => new AuditEntry
             {
