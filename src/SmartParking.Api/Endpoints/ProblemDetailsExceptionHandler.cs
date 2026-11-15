@@ -9,7 +9,8 @@ namespace SmartParking.Api.Endpoints;
 /// <list type="bullet">
 /// <item>invalid input (domain invariant or unreadable body) → 400, with the offending field in <c>errors</c>;</item>
 /// <item>missing resource → 404;</item>
-/// <item>concurrency, uniqueness or reference conflict, invalid state transition, no tariff in force → 409.</item>
+/// <item>concurrency, uniqueness or reference conflict, invalid state transition, no tariff in force → 409;</item>
+/// <item>event bus unavailable (UC-01 ingestion) → 503.</item>
 /// </list>
 /// Anything else falls through to the default 500 handling.
 /// </summary>
@@ -30,6 +31,7 @@ internal sealed class ProblemDetailsExceptionHandler(IProblemDetailsService prob
             ReferentialIntegrityException => (StatusCodes.Status409Conflict, "Referential integrity conflict.", null),
             InvalidStateTransitionException => (StatusCodes.Status409Conflict, "Invalid state transition.", null),
             NoTariffInForceException => (StatusCodes.Status409Conflict, "No tariff in force.", null),
+            EventBusUnavailableException => (StatusCodes.Status503ServiceUnavailable, "Event bus unavailable.", null),
             _ => (0, string.Empty, (Dictionary<string, string[]>?)null),
         };
 
