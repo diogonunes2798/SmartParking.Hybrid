@@ -425,3 +425,89 @@ Relatório completo: `docs/revisoes/fase-2b-revisao-desempenho-bd.md`. Foi feita
 - **Fase 4/5:** eventos de configuração (RF-06), quando o *read model* precisar deles.
 - **Fase 10:** purga ou arquivo das linhas processadas da outbox (RNF-05).
 - **`TODO(Diogo)`:** modelo definitivo do tarifário e regra de cálculo (início da sessão vs. repartição por períodos); referência bibliográfica do padrão outbox para o Cap. 4.5; decisão D1 com o orientador.
+
+## 15-11-2026 — Fase 3: ingestão (UC-01) até ao MongoDB
+
+Âmbito: `POST /api/ingest/occupancy` (lotes, validação RF-01, `202`), `IEventBus` em Redis Streams (D2), consumidor nos Workers que grava num log append-only no MongoDB (D3), sem duplicados. O Redis como *read model* (passo 4 do UC-01) fica para a Fase 4.
+
+### Plano e decisões (antes do código)
+
+- Plano aprovado em modo de planeamento, sem alterações.
+- **Onde fica a idempotência:** a garantia final é o índice único em `eventId` no MongoDB, porque o *bus* entrega pelo menos uma vez. A API só remove duplicados dentro do mesmo lote; não filtra entre pedidos (seria uma ida ao Redis ou ao MongoDB por evento, e não dispensaria o índice).
+- **Lote com um evento inválido:** a especificação (§4) não define o comportamento. Valor por omissão: aceitação parcial (`202` com a lista `rejected`, por índice); `400` só quando nenhum evento é válido. A alternativa fica numa opção (`Ingestion:RejectWholeBatchOnInvalid`). `TODO(Diogo):` confirmar com o orientador.
+- **Numeração dos ADR:** o guião pedia «ADR 0004» (D2) e «ADR 0005» (D3), mas esses números já estavam ocupados desde a Fase 2b (outbox e D1). Ficaram **ADR-0006** e **ADR-0007**.
+- **Nomes escolhidos:** stream `smartparking:occupancy-events`, grupo `occupancy-log`, *dead letter* `smartparking:occupancy-events:dead`, coleção `occupancy_events` na base de dados `smartparking`.
+- A skill `async-await-auditor` está instalada no dotnet-ai-toolkit, mas não estava ativa nesta sessão. A revisão foi feita por um subagente separado que leu o `SKILL.md` e o aplicou.
+
+### O que foi feito
+
+1. **Application:**
+   - `IEventBus` e `IMessageBatchHandler` (o *bus* só confirma um lote depois de o *handler* retornar; as mensagens impossíveis de processar voltam como *poison*); `IOccupancyEventLog`; `EventBusUnavailableException` (→ 503);
+   - `OccupancyEventValidator` (RF-01): trabalha sobre o `JsonElement` de cada evento, para que um `eventId` mal formado seja reportado pelo índice e não torne o pedido inteiro ilegível. `timestamp` sem fuso é rejeitado (seria interpretado na hora local do servidor);
+   - `IngestOccupancyBatchHandler`, `OccupancyEventMessage` (formato no *bus*, com o `payload` em JSON bruto e `receivedAt`), `OccupancyLogWriter` (consumidor) e `OccupancyIngestionMetrics`.
+2. **Infrastructure.Messaging:** `RedisStreamsEventBus` (um `XADD` por evento, em *pipeline*) e `RedisStreamConsumer<THandler>` (`BackgroundService`): cria o grupo, relê as suas pendentes antes das novas, `XACK` depois do *handler*, `XAUTOCLAIM` periódico, *dead letter* para *poison*, *back-off* exponencial até 5 s. O `Infrastructure.Cache` passou a registar o `IConnectionMultiplexer` com `TryAdd`, para partilhar a mesma ligação.
+3. **Infrastructure.Documents:** `MongoOccupancyEventLog` (só `insertMany` não ordenado; chave duplicada conta como «já gravado»; erros de documento são devolvidos como recusados); índices `ux_eventId` (único) e `ix_facilityId_timestamp`; `timestamp`, `receivedAt` e `storedAt` como BSON Date; GUID como UUID padrão (subtipo 4).
+4. **Api e Workers:** `IngestionEndpoints`; o `ProblemDetailsExceptionHandler` mapeia `EventBusUnavailableException` para 503; os Workers registam o consumidor `occupancy-log`.
+5. **Testes (26 novos):** `IngestionEndpointTests` (8 casos), `OccupancyEventValidatorTests` (12), `StreamConsumerRecoveryTests` (4) e `OccupancyEventLogIndexTests` (2), com um `IngestionFixture` próprio (Redis e MongoDB; o PostgreSQL não é arrancado porque a ingestão não lhe toca).
+6. **Documentação:** ADR-0006, ADR-0007 e `RASTREABILIDADE.md`.
+
+### Como se testou «parado antes do XACK»
+
+- Um *handler* de teste (`StopBeforeAckHandler`) chama o `OccupancyLogWriter` real (o documento fica no MongoDB), sinaliza e fica à espera até ser cancelado. O teste confirma 1 documento e `XPENDING` = 1, e para o *host* (`StopAsync`): o *handler* é cancelado e o `XACK` nunca é enviado; `XPENDING` continua 1.
+- Arranca-se um consumidor normal **com o mesmo nome**. Ao arrancar, lê as suas pendentes (`XREADGROUP … 0`), volta a gravar (chave duplicada, sem efeito) e confirma: `XPENDING` = 0 e continua a haver 1 documento.
+- Variante: o consumidor que ficou com a entrada nunca volta, e outro consumidor reclama-a com `XAUTOCLAIM` (intervalos curtos no teste).
+- Cada teste de recuperação usa um stream próprio, para que as pendentes de um teste não interfiram nos outros.
+
+### Problemas encontrados e tentativas falhadas
+
+1. **Heredocs no Git Bash, outra vez.** Um comando que escrevia dois ficheiros C# com heredocs falhou com «unexpected EOF while looking for matching `'`» (o texto tinha plicas dentro de expressões regulares e mensagens). Nada foi escrito; os ficheiros foram escritos com as ferramentas de edição. Terceira fase seguida com este problema: para código, não usar heredocs.
+2. **`LoggerMessage.Define` sem o argumento da exceção** (CS7036 em duas chamadas) e **CA1001** (`SemaphoreSlim` num tipo não descartável); corrigidos (passar `null`; `MongoOccupancyEventLog` passou a `IDisposable`).
+3. **Ambiguidade nos testes:** `SmartParking.Infrastructure.Documents.DependencyInjection` e `SmartParking.Infrastructure.Messaging.DependencyInjection` com o mesmo nome; resolvido com *aliases*, como já se fazia no `ApiFixture`.
+4. **`IHost` não é `IAsyncDisposable`**, por isso `await using` não compilava. Criou-se `RunningConsumer`, que faz `StopAsync` (paragem ordenada) antes de `Dispose`.
+5. **Tipos numéricos no `payload` (falha de teste com interesse para a tese).** O teste enviava `"noise": [41.2, 43.0]` e esperava dois `Double`. O `System.Text.Json` escreveu `43.0` como `43`, e o MongoDB gravou-o como **Int32**. O tipo BSON segue o texto JSON que chega. O teste passou a fixar este comportamento. Consequência registada no ADR-0007: quem agregar campos do `payload` (Fases 6 e 7) não pode assumir um único tipo numérico.
+6. **Desvio ao plano: *dead letter* depois de N entregas.** O plano previa mandar para a *dead letter* as mensagens com mais de 5 entregas. Ao escrever o ciclo, percebeu-se que, com o MongoDB em baixo, **todas** as mensagens ultrapassariam esse número e seriam desviadas: uma perda de eventos no cenário `failover` (RNF-03). Ficou só a *dead letter* para o que o *handler* classifica como impossível de processar (JSON inválido, documento recusado pelo MongoDB). Justificação no ADR-0006.
+7. **Desvio ao plano: criação dos índices.** O plano previa um `IHostedService` no arranque. Ficou uma criação preguiçosa antes da primeira gravação (com `SemaphoreSlim`): se o MongoDB estiver em baixo no arranque, os Workers arrancam na mesma, e nenhuma gravação acontece sem o índice único.
+8. **Comando do guião:** `mongosh smartparking` sem credenciais falha com «Command aggregate requires authentication». O compose cria o utilizador `smartparking` na base de dados `admin`; é preciso `-u smartparking -p smartparking --authenticationDatabase admin`.
+9. **O ADR-0007 tinha um exemplo errado** (ordenação de «…T9…» vs. «…T10…»): no ISO 8601 a hora tem sempre dois dígitos. Foi substituído pelo problema real dos *timestamps* como texto (fusos e precisões diferentes ordenam mal).
+
+### Verificação (resultados reais)
+
+- `dotnet build`: sem erros nem avisos (`TreatWarningsAsErrors`).
+- `dotnet test` (solução inteira): **116 testes, 0 falhados** (eram 90 no fim da Fase 2b; mais 26 da Fase 3). Os 26 testes de ingestão foram repetidos mais 3 vezes, sem falhas (cerca de 11 s por execução).
+- Teste manual com o compose, a API (porta 5080) e os Workers (porta 5090), feito pelo Claude Code a 15-11-2026 (`TODO(Diogo):` repetir):
+
+  | passo | resultado |
+  |---|---|
+  | 1.º `curl` | `202` `{"accepted":1,"duplicatesInBatch":0,"rejected":[]}` |
+  | `XLEN smartparking:occupancy-events` | 1 |
+  | `db.occupancy_events.countDocuments()` | 1 |
+  | 2.º `curl` (igual) | `202` com o mesmo corpo |
+  | `XLEN` | **2** (a API volta a publicar: não filtra entre pedidos) |
+  | `countDocuments()` | **1** (o índice único absorveu a repetição) |
+  | `XPENDING … occupancy-log` | 0 |
+
+  Documento gravado: `eventId: UUID('11111111-…')`, `timestamp: ISODate('2026-11-14T10:00:00.000Z')`, `payload: {}`, `receivedAt` e `storedAt` com 148 ms de diferença (inclui a criação dos índices na primeira gravação). Métricas em `/metrics`: API `smartparking_ingest_events_total{outcome="accepted"} 2`; Workers `smartparking_occupancy_log_events_total{outcome="inserted"} 1` e `{outcome="duplicate"} 1`, `smartparking_bus_consumer_messages_total{outcome="acked"} 2`.
+- A API e os Workers foram parados no fim (lição das Fases 2a e 2b).
+- Cada um dos 5 *commits* de código compila sozinho (verificado num *worktree* temporário, *commit* a *commit*): os *commits* foram ordenados por dependência (Application → Messaging → Documents → Api/Workers → testes), como ficou combinado na Fase 2b.
+
+### Revisão de código assíncrono (passo 5)
+
+Relatório completo: `docs/revisoes/fase-3-revisao-async.md`. Foi feita por um subagente separado, que aplicou o método do `SKILL.md` do `async-await-auditor` (dotnet-ai-toolkit 1.3.0), sem editar `src/` nem `tests/`. Usou um contentor Redis descartável e um programa de teste fora do repositório para medir o comportamento real.
+
+- **Nenhum achado alto.** O revisor não encontrou nenhum caminho com `XACK` antes da escrita, perda de mensagem, ciclo sem espera, paragem pendurada ou *deadlock*.
+- **Achados** (nenhum corrigido ainda; `TODO(Diogo):` decidir quais se corrigem nesta fase):
+  1. **Média.** Há uma janela de perda num *crash* abrupto **dos motores**, não do processo .NET. O Redis usa `appendfsync everysec`, por isso o `202` pode sair até cerca de 1 s antes de o evento estar em disco. O MongoDB é *standalone* com `w:1` sem `j:true`, e o `XACK` segue logo a seguir. A afirmação «sem perda» (RNF-03) só vale para falhas do processo e paragens ordenadas. Já ficou documentado no ADR-0006 e no ADR-0007; a medição com `appendfsync always` / `j:true` fica para a Fase 9.
+  2. **Baixa.** Com o Redis em baixo, a primeira resposta de `/health/live` dos Workers demorou 8,8 s (0,9 s com o Redis disponível). A causa é o `ConnectionMultiplexer.Connect` síncrono, chamado também pelo `RedisConnectionWarmup` da Fase 1. O comentário do `Task.Yield` no consumidor promete mais do que o código faz.
+  3. **Baixa.** Um erro de documento com a categoria `ExecutionTimeout` é transitório, mas hoje vai para a *dead letter*.
+  4. **Baixa.** Uma exceção determinística do *handler* bloqueia o grupo, e só fica um aviso no *log*. Proposta: uma métrica de falhas ou de contagem de entregas. O revisor confirmou que o Redis 7.4 incrementa essa contagem ao reler com `XREADGROUP 0`.
+  5. **Baixa.** Falta `ConfigureAwait(false)` em `IngestOccupancyBatchHandler` e no código anterior de `Application` e `Relational`. Proposta: ativar a regra CA2007 só nas bibliotecas.
+  6. **Baixa.** Quando o pedido é cancelado, o `WaitAsync(ct)` abandona as tarefas `XADD`, e uma falha posterior fica por observar.
+  7. a 10. **Informativos:** o `XAUTOCLAIM` percorre a PEL inteira sem consultar o *token*; as cópias para a *dead letter* são em série e há um `List.Contains` O(n²); o histograma de *lag* inclui duplicados e o contador `poison` pode contar a dobrar; um `MaxBackoff` sem limite superior pode fazer `Task.Delay` lançar fora do `catch`.
+- **Verificado sem problemas** pelo revisor: o `XACK` só depois da escrita; as entradas de um `XREADGROUP >` cuja resposta se perdeu são relidas; o cancelamento na paragem sai sem `XACK`; a paragem fica limitada a cerca de 5 s (`AsyncTimeout`); o *back-off* vai de 200 ms a 5 s; o duplo teste do `SemaphoreSlim` está correto; o âmbito de DI de cada lote é sempre libertado.
+
+### Pontos a levar para a próxima fase
+
+- **Fase 4:** segundo grupo (`availability`) no mesmo stream; o *read model* tem de comparar `timestamp`, porque com vários consumidores a ordem entre eventos do mesmo lugar não é garantida (ADR-0006).
+- **Fase 9:** custo do *polling* de 100 ms na D7; `XREADGROUP BLOCK` com uma ligação dedicada; `appendfsync` e `j:true` (achado 1); *pool* Npgsql (memória da Fase 2b).
+- **Fase 10:** aparar o stream e a *dead letter*; `_id` = `eventId` e *time series collections* como variantes de armazenamento (ADR-0007).
+- **`TODO(Diogo)`:** comportamento de um lote com inválidos; Redis Streams vs. Kafka (justificação qualitativa ou medição); referências do Cap. 4 para Redis Streams, Kafka e *Event Store*; repetir o teste manual.
