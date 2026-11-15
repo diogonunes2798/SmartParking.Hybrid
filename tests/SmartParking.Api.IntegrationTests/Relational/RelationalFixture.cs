@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SmartParking.Application.Configuration;
+using SmartParking.Application.Users;
 using SmartParking.Domain.Facilities;
 using SmartParking.Infrastructure.Relational;
 
@@ -58,12 +59,13 @@ public sealed class RelationalFixture : IAsyncLifetime
 
     public static GeoJsonPoint Coimbra => new("Point", [-8.4103, 40.2033]);
 
-    public async Task<FacilityDto> CreateFacilityAsync(string? name = null, GeoJsonPoint? location = null, CancellationToken ct = default)
+    public async Task<FacilityDto> CreateFacilityAsync(
+        string? name = null, GeoJsonPoint? location = null, string zone = "Centro", CancellationToken ct = default)
     {
         var response = await Client.PostAsJsonAsync(
             "/api/facilities",
             new CreateFacility(
-                name ?? $"Facility {Guid.NewGuid():N}", location ?? Coimbra, 120, FacilityType.MultiStorey, "ISEC", "Centro"),
+                name ?? $"Facility {Guid.NewGuid():N}", location ?? Coimbra, 120, FacilityType.MultiStorey, "ISEC", zone),
             Json,
             ct);
         response.EnsureSuccessStatusCode();
@@ -87,6 +89,34 @@ public sealed class RelationalFixture : IAsyncLifetime
             "/api/sensors", new CreateSensor(spotId, "MagSense M2", "1.4.0", SensorStatus.Active), Json, ct);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<SensorDto>(Json, ct))!;
+    }
+
+    /// <summary>A unique zone, so the tariff lookup of one test never sees another test's tariffs.</summary>
+    public static string NewZone() => $"Zone-{Guid.NewGuid():N}";
+
+    public async Task<TariffDto> CreateTariffAsync(
+        string zone, TariffRulesDto rules, DateTimeOffset? validFrom = null, CancellationToken ct = default)
+    {
+        var response = await Client.PostAsJsonAsync(
+            "/api/tariffs",
+            new CreateTariff(zone, validFrom ?? new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), rules),
+            Json,
+            ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TariffDto>(Json, ct))!;
+    }
+
+    public async Task<(UserDto User, VehicleDto Vehicle)> CreateUserWithVehicleAsync(CancellationToken ct = default)
+    {
+        var userResponse = await Client.PostAsJsonAsync(
+            "/api/users", new CreateUser("Driver", $"driver.{Guid.NewGuid():N}@example.com"), Json, ct);
+        userResponse.EnsureSuccessStatusCode();
+        var user = (await userResponse.Content.ReadFromJsonAsync<UserDto>(Json, ct))!;
+
+        var vehicleResponse = await Client.PostAsJsonAsync(
+            $"/api/users/{user.Id}/vehicles", new CreateVehicle($"T{Guid.NewGuid():N}"[..8], VehicleType.Car), Json, ct);
+        vehicleResponse.EnsureSuccessStatusCode();
+        return (user, (await vehicleResponse.Content.ReadFromJsonAsync<VehicleDto>(Json, ct))!);
     }
 }
 
