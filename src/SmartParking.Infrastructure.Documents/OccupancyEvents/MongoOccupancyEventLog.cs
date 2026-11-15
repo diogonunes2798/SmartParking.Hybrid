@@ -89,6 +89,47 @@ public sealed class MongoOccupancyEventLog(IMongoDatabase database, TimeProvider
         }
     }
 
+    /// <summary>
+    /// Last event of every spot, for the read model rebuild (ADR-0008). One <c>$group</c> with <c>$top</c> (MongoDB
+    /// 5.2+), which keeps one document per spot while it scans, instead of sorting the whole collection first. It is a
+    /// collection scan: no index on <c>spotId</c> is added for an operation that runs only on rebuilds, because every
+    /// index costs on each of the ~1.4 million inserts per day (D8). <c>allowDiskUse</c> for very large logs.
+    /// </summary>
+    public async IAsyncEnumerable<LatestSpotEvent> GetLatestPerSpotAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        BsonDocument[] pipeline =
+        [
+            new("$group", new BsonDocument
+            {
+                { "_id", "$spotId" },
+                {
+                    "last", new BsonDocument("$top", new BsonDocument
+                    {
+                        { "sortBy", new BsonDocument { { "timestamp", -1 }, { "eventId", -1 } } },
+                        { "output", new BsonDocument { { "eventId", "$eventId" }, { "type", "$type" }, { "timestamp", "$timestamp" } } },
+                    })
+                },
+            }),
+        ];
+
+        using var cursor = await collection
+            .AggregateAsync<BsonDocument>(pipeline, new AggregateOptions { AllowDiskUse = true }, cancellationToken)
+            .ConfigureAwait(false);
+        while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
+        {
+            foreach (var document in cursor.Current)
+            {
+                var last = document["last"].AsBsonDocument;
+                yield return new LatestSpotEvent(
+                    last["eventId"].AsBsonBinaryData.ToGuid(GuidRepresentation.Standard),
+                    document["_id"].AsBsonBinaryData.ToGuid(GuidRepresentation.Standard),
+                    last["type"].AsString == "OCCUPIED" ? OccupancyEventType.Occupied : OccupancyEventType.Freed,
+                    new DateTimeOffset(last["timestamp"].ToUniversalTime(), TimeSpan.Zero));
+            }
+        }
+    }
+
     /// <summary>Creates the two indexes of the log if they do not exist (idempotent on the server).</summary>
     public async Task EnsureIndexesAsync(CancellationToken cancellationToken)
     {

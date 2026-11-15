@@ -38,4 +38,13 @@ public sealed record AppendResult(int Inserted, IReadOnlyList<Guid> DuplicateIds
 public interface IOccupancyEventLog
 {
     Task<AppendResult> AppendAsync(IReadOnlyList<OccupancyEventRecord> records, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The most recent event of every spot in the log (by <c>timestamp</c>), for rebuilding the availability read
+    /// model (ADR-0008). Read-only: the log itself is never changed.
+    /// </summary>
+    IAsyncEnumerable<LatestSpotEvent> GetLatestPerSpotAsync(CancellationToken cancellationToken);
 }
+
+/// <summary>The last known event of one spot (rebuild of the read model).</summary>
+public sealed record LatestSpotEvent(Guid EventId, Guid SpotId, OccupancyEventType Type, DateTimeOffset Timestamp);
