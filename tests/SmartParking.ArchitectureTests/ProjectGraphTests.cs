@@ -21,7 +21,12 @@ public sealed class ProjectGraphTests
         [Application] = new(Projects: [Domain], Packages: [], Frameworks: []),
         ["SmartParking.Infrastructure.Relational"] = new(
             Projects: [Application],
-            Packages: ["Npgsql", "Npgsql.*", "Microsoft.EntityFrameworkCore*", "AspNetCore.HealthChecks.NpgSql", "Microsoft.Extensions.*"],
+            // EFCore.NamingConventions: EF Core plug-in (snake_case schema), same engine, no new runtime dependency.
+            Packages:
+            [
+                "Npgsql", "Npgsql.*", "Microsoft.EntityFrameworkCore*", "EFCore.NamingConventions",
+                "AspNetCore.HealthChecks.NpgSql", "Microsoft.Extensions.*",
+            ],
             Frameworks: []),
         ["SmartParking.Infrastructure.Documents"] = new(
             Projects: [Application],
