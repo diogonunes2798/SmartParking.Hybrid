@@ -22,7 +22,7 @@ Requisitos que pesam: entrega «pelo menos uma vez» com consumidores idempotent
    - `IMessageBatchHandler.HandleAsync(lote)`: o *bus* só confirma o lote depois de o *handler* retornar. Uma exceção significa «falha transitória, entregar de novo». As mensagens que nunca poderão ser processadas são devolvidas como *poison*.
    Trocar para Kafka é escrever outra implementação destes dois contratos, sem tocar na API, no `Application` nem no MongoDB.
 
-2. **Implementação em Redis Streams** (`Infrastructure.Messaging`), no mesmo Redis do *read model* (sem contentor de *broker*):
+2. **Implementação em Redis Streams** (`Infrastructure.Messaging`), no mesmo servidor Redis do *read model* (sem contentor de *broker*), mas com uma ligação própria, aberta de forma assíncrona (`RedisBusConnection`), para que um Redis inacessível não atrase o arranque dos processos (revisão da Fase 3, achado 2):
 
    | Aspeto | Como |
    |---|---|
@@ -59,7 +59,7 @@ Requisitos que pesam: entrega «pelo menos uma vez» com consumidores idempotent
 - **Positivas:**
   - entrega «pelo menos uma vez» verificada por testes: consumidor parado antes do `XACK` e reiniciado (`StreamConsumerRecoveryTests.Consumer_stopped_before_ack_reprocesses_on_restart_without_duplicating`), consumidor morto cujas entradas são reclamadas por outro (`Entry_abandoned_by_a_dead_consumer_is_claimed_by_another`), *poison* que não bloqueia as seguintes (`Malformed_entry_goes_to_the_dead_letter_stream_and_does_not_block_the_next_ones`);
   - grupos independentes: a Fase 4 acrescenta o grupo do *read model* ao mesmo stream sem mexer neste;
-  - métricas: `smartparking.bus.consumer.messages` por grupo e resultado (`acked`, `acked_recovered`, `claimed`, `dead_lettered`); *spans* de consumo ligados aos do produtor pelo `traceparent`.
+  - métricas: `smartparking.bus.consumer.messages` por grupo e resultado (`acked`, `acked_recovered`, `claimed`, `dead_lettered`); `smartparking.bus.consumer.failures` e `smartparking.bus.consumer.consecutive_failures`, que tornam visível um grupo bloqueado por uma falha que se repete (revisão da Fase 3, achado 4); *spans* de consumo ligados aos do produtor pelo `traceparent`.
 - **Negativas e limites:**
   - o *polling* acrescenta até 100 ms à latência do UC-01 (metade em média) quando o stream está vazio; sob carga, o consumidor lê sem esperar. A medir na Fase 9 (D7);
   - o stream cresce sem limite até à Fase 10; com 1,4 milhões de eventos por dia (D8), a memória do Redis é o recurso a vigiar;

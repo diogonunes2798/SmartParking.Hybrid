@@ -36,7 +36,7 @@ O log recebe o UC-01 a partir do *bus* (ADR-0006), que entrega cada mensagem **p
    - `ux_eventId`: `{ eventId: 1 }`, **único**. É a garantia final da idempotência: a gravação é `insertMany` não ordenado, e o erro de chave duplicada (código 11000) conta como «já gravado», não como falha;
    - `ix_facilityId_timestamp`: `{ facilityId: 1, timestamp: 1 }`, o índice de particionamento da §5.
 
-4. **Erros por documento vs. falhas transitórias.** Num `insertMany`, um erro de escrita de um documento concreto (por exemplo, um nome de campo que o motor recuse dentro do `payload`) repete-se em todas as tentativas. Esses eventos são devolvidos como recusados e o *bus* manda-os para a *dead letter* (ADR-0006). Tudo o resto (rede, eleição de primário, *write concern*) é lançado como exceção, e o lote inteiro é repetido.
+4. **Erros por documento vs. falhas transitórias.** Num `insertMany`, um erro de escrita de um documento concreto (por exemplo, um nome de campo que o motor recuse dentro do `payload`) repete-se em todas as tentativas. Esses eventos são devolvidos como recusados e o *bus* manda-os para a *dead letter* (ADR-0006). A exceção é a categoria `ExecutionTimeout`, que é transitória (revisão da Fase 3, achado 3). Essa, e tudo o resto (rede, eleição de primário, *write concern*), é lançada como exceção, e o lote inteiro é repetido.
 
 5. **Sem reconstrução de agregados.** O estado atual de cada lugar não é obtido relendo o log. Vem do *read model* no Redis (Fase 4), alimentado pelo mesmo *bus*. O log serve a auditoria, a analítica (Fase 6) e a retenção (Fase 10).
 
