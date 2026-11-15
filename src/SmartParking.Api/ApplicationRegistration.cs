@@ -1,4 +1,7 @@
 using SmartParking.Application.Configuration;
+using SmartParking.Application.Sessions;
+using SmartParking.Application.Users;
+using SmartParking.Domain.Tariffs;
 
 namespace SmartParking.Api;
 
@@ -15,6 +18,12 @@ internal static class ApplicationRegistration
         services.AddScoped<SpotCommands>();
         services.AddScoped<SensorCommands>();
         services.AddScoped<TariffCommands>();
+
+        // UC-02 (sessions and payment) and its precondition (users and vehicles). The query side is
+        // ISessionQueries (Relational). Pricing is provisional and replaceable (TODO(Diogo), ITariffPricing).
+        services.AddScoped<SessionCommands>();
+        services.AddScoped<UserCommands>();
+        services.AddSingleton<ITariffPricing, ProvisionalTariffPricing>();
         return services;
     }
 }

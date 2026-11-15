@@ -11,11 +11,13 @@ public enum ParkingSessionStatus
 
 /// <summary>
 /// Parking session (spec §3, UC-02). Where it is stored is decision D1 (default: relational, behind
-/// <c>IParkingSessionRepository</c>). The UC-02 endpoints and the outbox arrive in Phase 2b.
-/// State machine: Open → Closed → Paid.
+/// <c>IParkingSessionRepository</c>; ADR-0005). State machine: Open → Closed → Paid. Every transition raises a
+/// domain event that is written to the outbox in the same transaction (ADR-0004).
 /// </summary>
-public sealed class ParkingSession : IVersioned
+public sealed class ParkingSession : IVersioned, IHasDomainEvents
 {
+    private readonly List<IDomainEvent> _domainEvents = [];
+
     private ParkingSession()
     {
     }
@@ -42,8 +44,9 @@ public sealed class ParkingSession : IVersioned
 
     public uint Version { get; private set; }
 
-    public static ParkingSession Open(Guid spotId, Guid vehicleId, Guid userId, DateTimeOffset startedAt) =>
-        new()
+    public static ParkingSession Open(Guid spotId, Guid vehicleId, Guid userId, DateTimeOffset startedAt)
+    {
+        var session = new ParkingSession
         {
             Id = Guid.CreateVersion7(),
             SpotId = Guard.Id(spotId, nameof(spotId)),
@@ -52,13 +55,25 @@ public sealed class ParkingSession : IVersioned
             StartedAt = Guard.Utc(startedAt),
             Status = ParkingSessionStatus.Open,
         };
+        session._domainEvents.Add(new SessionStarted(session.Id, session.SpotId, session.StartedAt));
+        return session;
+    }
 
-    public void Close(DateTimeOffset endedAt, Guid tariffId, decimal cost)
+    /// <summary>Fails fast, before the tariff is looked up, when the session can no longer be closed.</summary>
+    public void EnsureCanClose()
     {
         if (Status != ParkingSessionStatus.Open)
         {
-            throw new DomainValidationException("status", $"cannot close a session in state {Status}");
+            throw new InvalidStateTransitionException($"Cannot close session '{Id}' in state {Status}.");
         }
+    }
+
+    /// <param name="endedAt">End instant.</param>
+    /// <param name="tariffId">Tariff in force, used to compute <paramref name="cost"/>.</param>
+    /// <param name="cost">Amount due in EUR; rounded to cents (Money).</param>
+    public void Close(DateTimeOffset endedAt, Guid tariffId, decimal cost)
+    {
+        EnsureCanClose();
 
         var end = Guard.Utc(endedAt);
         if (end < StartedAt)
@@ -66,24 +81,31 @@ public sealed class ParkingSession : IVersioned
             throw new DomainValidationException(nameof(endedAt), "must not be earlier than startedAt");
         }
 
-        if (cost < 0)
-        {
-            throw new DomainValidationException(nameof(cost), "must not be negative");
-        }
-
         EndedAt = end;
         TariffId = Guard.Id(tariffId, nameof(tariffId));
-        Cost = cost;
+        Cost = Money.Normalise(cost, nameof(cost));
         Status = ParkingSessionStatus.Closed;
+        _domainEvents.Add(new SessionClosed(Id, SpotId, TariffId.Value, StartedAt, Cost.Value, end));
     }
 
-    public void MarkPaid()
+    /// <summary>Registers the payment of the amount due. Only a closed session can be paid (UC-02).</summary>
+    public Payment Pay(PaymentMethod method, DateTimeOffset paidAt)
     {
         if (Status != ParkingSessionStatus.Closed)
         {
-            throw new DomainValidationException("status", $"cannot pay a session in state {Status}");
+            throw new InvalidStateTransitionException($"Cannot pay session '{Id}' in state {Status}.");
         }
 
+        var payment = Payment.Register(Id, Cost!.Value, method, paidAt);
         Status = ParkingSessionStatus.Paid;
+        _domainEvents.Add(new PaymentRegistered(payment.Id, Id, payment.Amount, payment.Method, payment.Timestamp));
+        return payment;
+    }
+
+    public IReadOnlyList<IDomainEvent> DequeueDomainEvents()
+    {
+        var events = _domainEvents.ToArray();
+        _domainEvents.Clear();
+        return events;
     }
 }

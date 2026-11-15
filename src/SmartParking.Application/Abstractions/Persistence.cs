@@ -1,4 +1,5 @@
 using SmartParking.Domain.Sessions;
+using SmartParking.Domain.Tariffs;
 
 namespace SmartParking.Application.Abstractions;
 
@@ -32,8 +33,19 @@ public interface IParkingSessionRepository : IRepository<ParkingSession>
     Task<ParkingSession?> FindOpenBySpotAsync(Guid spotId, CancellationToken cancellationToken);
 }
 
+/// <summary>Read-only lookup of the tariff that prices a session (UC-02).</summary>
+public interface ITariffLookup
+{
+    /// <summary>
+    /// Tariff of the zone of the spot's facility whose validity contains <paramref name="instant"/>; when
+    /// several overlap (no rule forbids it yet, diary of Phase 2a), the one that started most recently.
+    /// </summary>
+    Task<Tariff?> FindInForceForSpotAsync(Guid spotId, DateTimeOffset instant, CancellationToken cancellationToken);
+}
+
 /// <summary>
-/// Commits the changes of a use case atomically. Store-specific failures are translated into the
+/// Commits the changes of a use case atomically, in one transaction, together with the outbox rows of the
+/// domain events they raised (ADR-0004). Store-specific failures are translated into the
 /// exceptions of <see cref="Common"/> so handlers and endpoints stay persistence-ignorant.
 /// </summary>
 public interface IUnitOfWork

@@ -4,11 +4,12 @@ using SmartParking.Domain.Sessions;
 using SmartParking.Domain.Tariffs;
 using SmartParking.Domain.Users;
 using SmartParking.Infrastructure.Relational.Auditing;
+using SmartParking.Infrastructure.Relational.Outbox;
 
 namespace SmartParking.Infrastructure.Relational;
 
 /// <summary>
-/// EF Core context of the relational sub-layer (spec §3: configuration, users, sessions, payments, audit).
+/// EF Core context of the relational sub-layer (spec §3: configuration, users, sessions, payments, audit, outbox).
 /// Mappings live in <c>Configurations/</c>, one class per entity, so the domain stays free of EF attributes.
 /// </summary>
 public sealed class SmartParkingDbContext(DbContextOptions<SmartParkingDbContext> options) : DbContext(options)
@@ -30,6 +31,8 @@ public sealed class SmartParkingDbContext(DbContextOptions<SmartParkingDbContext
     public DbSet<Payment> Payments => Set<Payment>();
 
     public DbSet<AuditEntry> AuditLog => Set<AuditEntry>();
+
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

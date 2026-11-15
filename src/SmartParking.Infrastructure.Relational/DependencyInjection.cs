@@ -5,16 +5,20 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using SmartParking.Application.Abstractions;
 using SmartParking.Application.Configuration;
+using SmartParking.Application.Sessions;
 using SmartParking.Domain.Facilities;
+using SmartParking.Domain.Sessions;
 using SmartParking.Domain.Tariffs;
+using SmartParking.Domain.Users;
 using SmartParking.Infrastructure.Relational.Auditing;
+using SmartParking.Infrastructure.Relational.Outbox;
 using SmartParking.Infrastructure.Relational.Persistence;
 
 namespace SmartParking.Infrastructure.Relational;
 
 /// <summary>
 /// Registers the relational sub-layer (PostgreSQL): one Npgsql data source shared by EF Core and the
-/// readiness check, the DbContext with the audit interceptor, repositories (including D1's session
+/// readiness check, the DbContext with the outbox and audit interceptors, repositories (including D1's session
 /// repository), the unit of work and the RF-06 queries.
 /// </summary>
 public static class DependencyInjection
@@ -44,21 +48,30 @@ public static class DependencyInjection
 
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<ICurrentActor>(new FixedActor(AnonymousActor));
+        services.AddSingleton<OutboxSaveChangesInterceptor>();
         services.AddSingleton<AuditSaveChangesInterceptor>();
 
         services.AddDbContext<SmartParkingDbContext>((sp, options) => options
             .UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>(), npgsql => npgsql
                 .MigrationsHistoryTable(MigrationsHistoryTable))
             .UseSnakeCaseNamingConvention()
-            .AddInterceptors(sp.GetRequiredService<AuditSaveChangesInterceptor>()));
+            // Order matters: the outbox rows are added first, then the audit rows (which skip the outbox).
+            .AddInterceptors(
+                sp.GetRequiredService<OutboxSaveChangesInterceptor>(),
+                sp.GetRequiredService<AuditSaveChangesInterceptor>()));
 
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();
         services.AddScoped<IRepository<ParkingFacility>, EfRepository<ParkingFacility>>();
         services.AddScoped<IRepository<ParkingSpot>, EfRepository<ParkingSpot>>();
         services.AddScoped<IRepository<Sensor>, EfRepository<Sensor>>();
         services.AddScoped<IRepository<Tariff>, EfRepository<Tariff>>();
+        services.AddScoped<IRepository<User>, EfRepository<User>>();
+        services.AddScoped<IRepository<Vehicle>, EfRepository<Vehicle>>();
+        services.AddScoped<IRepository<Payment>, EfRepository<Payment>>();
         services.AddScoped<IParkingSessionRepository, EfParkingSessionRepository>();
+        services.AddScoped<ITariffLookup, EfTariffLookup>();
         services.AddScoped<IConfigurationQueries, EfConfigurationQueries>();
+        services.AddScoped<ISessionQueries, EfSessionQueries>();
 
         services.AddHealthChecks()
             .AddNpgSql(name: HealthCheckName, tags: healthCheckTags, timeout: TimeSpan.FromSeconds(3));

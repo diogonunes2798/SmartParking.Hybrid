@@ -48,6 +48,7 @@ if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 
 app.MapDefaultEndpoints();
 app.MapConfigurationEndpoints();
+app.MapSessionEndpoints();
 
 await app.RunAsync();
 

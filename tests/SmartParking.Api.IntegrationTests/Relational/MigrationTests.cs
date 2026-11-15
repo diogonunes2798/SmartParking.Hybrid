@@ -12,7 +12,7 @@ public sealed class MigrationTests(RelationalFixture fixture)
 {
     private static readonly string[] ExpectedTables =
     [
-        "__ef_migrations_history", "audit_log", "parking_facilities", "parking_sessions", "parking_spots",
+        "__ef_migrations_history", "audit_log", "outbox_messages", "parking_facilities", "parking_sessions", "parking_spots",
         "payments", "sensors", "tariffs", "users", "vehicles",
     ];
 

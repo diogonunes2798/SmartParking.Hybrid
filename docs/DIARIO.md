@@ -321,3 +321,107 @@ Relatório completo: `docs/revisoes/fase-2a-revisao-independente.md`. Foi feita 
 - **Montantes (revisão, achado 5):** arredondar e limitar no domínio antes de `numeric(10,2)` (custo da sessão e valor do pagamento), quando a Fase 2b passar a escrevê-los.
 - **Tarifários:** não há regra contra períodos de validade sobrepostos para a mesma zona. Pode ser preciso uma restrição de exclusão (`EXCLUDE USING gist`, extensão `btree_gist`) quando se definir o cálculo.
 - **Auditoria em caso de falha:** se um `SaveChanges` falhar, as entradas de auditoria ficam no *change tracker* desse contexto. Hoje isto não tem efeito, porque o contexto é por pedido e não há novas tentativas. Se a Fase 2b introduzir uma estratégia de novas tentativas (`EnableRetryOnFailure`), as entradas têm de ser recriadas em cada tentativa.
+
+## 15-11-2026 — Fase 2b: UC-02 (sessões e pagamento) com outbox transacional
+
+Âmbito: `POST /api/sessions`, `/{id}/close` e `/{id}/pay`; em cada comando, a alteração e um evento (`SessionStarted`, `SessionClosed`, `PaymentRegistered`) gravados na mesma transação EF Core, na tabela `outbox_messages`; concorrência otimista com 409. O *worker* que publica a outbox fica para a Fase 5.
+
+### Plano e decisões do Diogo (antes do código)
+
+- O plano foi aprovado em modo de planeamento. O Diogo respondeu a três perguntas:
+  1. **Utilizadores e veículos:** não havia forma de os criar pela API (o RF-06 só cobre parques, lugares, sensores e tarifários). Escolha: *endpoints* mínimos `POST /api/users` e `POST /api/users/{id}/vehicles`, sem eventos, justificados como pré-condição do UC-02.
+  2. **Custo da sessão:** usar as três regras do tarifário provisório da Fase 2a (preço por hora, minutos grátis e teto diário), e não só o preço por hora. As regras **não vêm da especificação**: ficam atrás de `ITariffPricing`, com `TODO(Diogo)`.
+  3. **Revisão de desempenho de BD:** o agente `db-performance-auditor` pedido no guião não existe no projeto nem em `~/.claude/agents`. Usou-se um subagente genérico com um *brief* de auditoria de BD.
+- **Numeração dos ADR:** o guião pedia «ADR 0002» (outbox) e «ADR 0003» (D1), mas esses números já estavam ocupados (observabilidade e modelo relacional). Ficaram **ADR-0004** e **ADR-0005**.
+- As skills do dotnet-ai-toolkit não estavam disponíveis nesta sessão; seguiram-se os padrões da Fase 2a.
+
+### O que foi feito
+
+1. **Domain:**
+   - `IDomainEvent` e `IHasDomainEvents` (os eventos são expostos por um método, para o EF Core não tentar mapeá-los);
+   - `ParkingSession` levanta `SessionStarted`, `SessionClosed` e `PaymentRegistered`. O pagamento passa a ser criado por `ParkingSession.Pay(method, paidAt)` (o `Payment.Register` ficou `internal`), que verifica o estado e usa o custo da sessão como montante;
+   - `InvalidStateTransitionException` (fechar duas vezes, pagar uma sessão aberta) → **409**, e não 400 como na Fase 2a: é um conflito com o estado guardado, não um pedido mal formado;
+   - `Money.Normalise`: arredonda a cêntimos (metade para longe de zero) e rejeita valores negativos ou ≥ 10⁸ (achado 5 da revisão da Fase 2a);
+   - `ITariffPricing` e `ProvisionalTariffPricing` (minutos iniciados; minutos grátis no início; preço por hora, ao minuto; teto por bloco de 24 h).
+2. **Application:** `SessionCommands` (*handler* próprio, sem MediatR), `ISessionQueries`, `ITariffLookup`, `NoTariffInForceException` (409) e `UserCommands`. O custo é calculado com o tarifário em vigor **no início** da sessão (`TODO(Diogo)`: confirmar no Cap. 3).
+3. **Infrastructure.Relational:**
+   - `OutboxMessage` e a tabela `outbox_messages` (`id`, `type`, `aggregate_id`, `payload jsonb`, `occurred_at`, `processed_at` nula), com o índice parcial `ix_outbox_messages_unprocessed`;
+   - `OutboxSaveChangesInterceptor`, registado antes do de auditoria; a outbox não é auditada;
+   - `EfTariffLookup` (lugar → zona do parque → tarifário, numa só consulta) e `EfSessionQueries`;
+   - migração `AddOutbox` (só a tabela e o índice).
+4. **Api:** `SessionEndpoints` (sessões e utilizadores); o `ProblemDetailsExceptionHandler` mapeia as duas exceções novas para 409.
+5. **Testes:** `SessionEndpointsTests` (9), `OutboxAtomicityTests` (2) e `SessionDomainTests` (12 casos). O `MigrationTests` passa a esperar `outbox_messages`. Novos *helpers* no `RelationalFixture`: zona única por teste, tarifário, utilizador com veículo.
+6. **Documentação:** ADR-0004 (outbox em vez de 2PC), ADR-0005 (D1, com a contradição Cap. 3 vs Cap. 4.4.2/4.5) e `RASTREABILIDADE.md`.
+
+### Como se testou a atomicidade («falha a meio»)
+
+- Um *trigger* `BEFORE INSERT` em `outbox_messages`, criado pelo próprio teste e só para o `aggregate_id` dessa sessão, faz `RAISE EXCEPTION`. O fecho devolve 500. Depois disso, a sessão continua `Open`, só existe o evento `SessionStarted` e não há linha de auditoria do fecho. A seguir, sem o *trigger*, o fecho funciona: nada ficou meio gravado nem bloqueado.
+- Teste espelho: o mesmo *trigger* no `UPDATE` de `parking_sessions`.
+- Porquê dois testes: o EF Core envia o `UPDATE` da sessão e os `INSERT` da outbox e da auditoria num só lote, e a ordem dos comandos no lote não é garantida. Com uma falha de cada lado, o resultado não depende dessa ordem.
+- Porquê um *trigger*: a falha acontece **dentro** da transação da base de dados, depois de parte das instruções do lote já ter sido executada. Um *interceptor* que lançasse uma exceção antes de enviar o lote não provaria a atomicidade, porque nada chegaria a ser escrito.
+
+### Problemas encontrados e tentativas falhadas
+
+1. **Heredocs falhados no Git Bash (duas vezes).** Comandos que escreviam ficheiros com heredocs falharam com «unexpected EOF while looking for matching `'`» quando o texto tinha plicas ou crases. Nada foi escrito (erro de *parsing*); os ficheiros foram escritos com as ferramentas de edição.
+2. **Regra CA1716 com `TreatWarningsAsErrors`.** Os parâmetros `end` e, depois, `to` de `ITariffPricing.Price` colidem com palavras reservadas do VB (`End`, `To`). Ficaram `startedAt` e `endedAt`.
+3. **De novo, uma instância antiga da API bloqueava a compilação** (`SmartParking.Api.exe`, iniciada às 13:18, erro MSB3027). Foi parada com autorização do Diogo. É a segunda vez: a lição da Fase 2a («parar a API no fim da verificação manual») não chegou. `TODO(Diogo):` parar sempre a API ao terminar a verificação manual.
+4. **Colisão de *namespace* nos testes.** A pasta nova `tests/.../Domain/` criou o *namespace* `SmartParking.Api.IntegrationTests.Domain`, que passou a esconder `SmartParking.Domain` nos testes da Fase 2a (`Domain.Tariffs.Tariff` deixou de resolver). Foi renomeada para `DomainModel`.
+5. **Comando do guião:** tal como na Fase 2a, `psql -U sp` falha («role "sp" does not exist»). O utilizador do compose é `smartparking`.
+6. **Os *commits* intermédios não compilam todos sozinhos.** O *commit* da subcamada relacional usa `ITariffLookup`, que só entra no *commit* seguinte (Application/Api). O ramo compila no fim, mas um `git bisect` teria de saltar esse *commit*. Nota para as próximas fases: ordenar os *commits* por dependência (Application antes de Infrastructure).
+
+### Verificação (resultados reais)
+
+- `dotnet build`: 0 erros, 0 avisos.
+- `dotnet test`: **90/90** em 37,2 s (Api.IntegrationTests e ArchitectureTests). Os testes novos passaram à primeira execução. O facto de os testes de atomicidade receberem 500 confirma que o *trigger* disparou.
+- `dotnet ef migrations add AddOutbox` → migração só com `outbox_messages` e o índice parcial (nenhuma alteração inesperada ao resto do esquema).
+- `dotnet ef database update` (base de dados do compose): `20261115145043_AddOutbox` aplicada. O `\d outbox_messages` confirma as seis colunas, `processed_at` nula e o índice `ix_outbox_messages_unprocessed ... WHERE processed_at IS NULL`; 0 linhas.
+- **Teste manual no Swagger (passo 5).** Desta vez, a pedido do Diogo, foi feito pela sessão, no *browser* integrado, contra o compose (API em `localhost:5080`, `/health/ready` com os três motores *Healthy*):
+  1. dados prévios por HTTP (`curl`): tarifário da zona `Centro` (1,20 €/h, sem minutos grátis nem teto), parque «Parque Swagger 2b» na zona `Centro`, lugar `A-01`, utilizador e veículo → todos 201;
+  2. no Swagger UI («Try it out»): `POST /api/sessions` → **201**, `status: Open`; `POST /api/sessions/{id}/close` com `{}` → **200**, `status: Closed`, `cost: 0.02` (18 s → 1 minuto iniciado × 1,20 €/60); `POST /api/sessions/{id}/pay` com `{"method":"Card"}` → **201**, `amount: 0.02`, `status: Completed`;
+  3. `psql`:
+
+     ```
+            type        |          occurred_at          | processed_at
+     -------------------+-------------------------------+--------------
+      SessionStarted    | 2026-11-15 15:24:27.558158+00 |
+      SessionClosed     | 2026-11-15 15:24:45.933095+00 |
+      PaymentRegistered | 2026-11-15 15:25:01.136866+00 |
+     (3 rows)
+     ```
+
+     Os *payloads* só têm identificadores, instantes e montantes (nem utilizador, nem veículo). O `audit_log` tem 4 linhas para esta sessão: `ParkingSession` Created, Updated, Updated e `Payment` Created; nenhuma da outbox.
+  4. A API foi parada no fim.
+- **Observações do teste manual:**
+  - o exemplo gerado pelo Swagger para o `pay` traz `"version": 0`. Enviado tal como está, dá 409 (versão desatualizada), o que pode confundir quem testa. Retirou-se o campo. `TODO(Diogo):` decidir se se documenta o campo como opcional no OpenAPI ou se fica assim;
+  - o exemplo do `close` traz o corpo `null`, que também é aceite;
+  - o *payload* inclui `aggregateId`, que repete `sessionId` (a propriedade calculada de `IDomainEvent` é serializada). É inofensivo, mas redundante; pode ser retirado na Fase 5, quando o formato dos eventos for fixado com o consumidor.
+
+### Revisão de desempenho de BD (passo 6)
+
+Relatório completo: `docs/revisoes/fase-2b-revisao-desempenho-bd.md`. Foi feita por um subagente separado (o «db-performance-auditor» não existia; ver o plano), só de leitura sobre o código. Para obter o SQL real, o revisor correu Start, Close e Pay num contentor PostgreSQL descartável (removido no fim); na base de dados do compose só fez `EXPLAIN`. A sessão principal confirmou que nenhum ficheiro de código foi alterado, que a base de dados do compose continua sem sessões nem eventos e que `max_connections` = 100 sem `Maximum Pool Size` na *connection string*.
+
+- **Nenhum achado alto.** Nenhum foi corrigido nesta fase; todos ficam registados com a fase em que devem ser tratados.
+  1. *Pool* de ligações (média): a API e os Workers podem abrir até 100 ligações cada, contra `max_connections` = 100. É só configuração. `TODO(Diogo):` decidir se se corrige já ou antes da Fase 9.
+  2. Outbox (média): crescimento sem limite e `UPDATE processed_at` sem atualização HOT → Fase 5 (e purga na Fase 10). Aviso para o *poller*: não usar um cursor `occurred_at > último`, porque perderia linhas confirmadas mais tarde com um `occurred_at` anterior.
+  3. Idas à base de dados por comando: Start 4, Close 4, Pay 3 (as escritas vão num único lote e numa transação). Duas são evitáveis → Fase 9, só se a medição o justificar.
+  4. `EfTariffLookup` ordena antes do `LIMIT 1`; um índice `(zone, valid_from DESC)` ou uma cache resolveriam → Fase 9.
+  5. As atualizações de `parking_sessions` nunca são HOT (`tariff_id` tem índice; `status` está no predicado do índice parcial) → documentar no Cap. 6.4.
+  6. `DetectChanges` várias vezes por `SaveChanges` → sem correção (1 a 3 entidades por pedido).
+  7. `AddDbContextPool` → experiência opcional na Fase 9 (deixa de ser compatível quando `ICurrentActor` for por pedido).
+- **Verificado sem problemas** pelo revisor: `FindAsync`/`AnyAsync` pela chave primária; dois Start simultâneos no mesmo lugar dão 409 pelo índice único parcial; num conflito de `xmin` no Pay, o `INSERT` do pagamento é revertido no mesmo lote (não fica pagamento órfão).
+
+### Decisões tomadas
+
+- **ADR-0004:** outbox transacional na mesma base de dados, escrita por um *interceptor* a partir de eventos de domínio; sem 2PC, sem *dual write* e sem CDC.
+- **ADR-0005:** D1 mantém o valor por omissão (relacional); a contradição entre os Caps. 3 e 4 fica assinalada.
+- 409 para transições de estado inválidas e para «sem tarifário em vigor».
+- `version` opcional no `close` e no `pay`: a concorrência é sempre verificada pelo `xmin`; a versão no corpo só serve para rejeitar logo uma vista desatualizada do cliente.
+- Eventos sem dados do utilizador nem do veículo (minimização, RNF-06).
+- Os eventos de configuração (RF-06) **não** foram emitidos: o mecanismo existe, mas não há consumidor antes da Fase 4, e emiti-los agora poria mais de 3 linhas na outbox do teste manual.
+
+### Pontos a levar para a próxima fase
+
+- **Fase 5:** *worker* da outbox (`SELECT ... WHERE processed_at IS NULL ORDER BY occurred_at ... FOR UPDATE SKIP LOCKED`), publicação no `IEventBus` (D2), idempotência pelo `id` e medição da janela `occurred_at` → atualização do *read model*.
+- **Fase 4/5:** eventos de configuração (RF-06), quando o *read model* precisar deles.
+- **Fase 10:** purga ou arquivo das linhas processadas da outbox (RNF-05).
+- **`TODO(Diogo)`:** modelo definitivo do tarifário e regra de cálculo (início da sessão vs. repartição por períodos); referência bibliográfica do padrão outbox para o Cap. 4.5; decisão D1 com o orientador.
