@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using StackExchange.Redis;
 
 namespace SmartParking.Infrastructure.Cache;
@@ -29,7 +30,8 @@ public static class DependencyInjection
         // instead of the process crashing (needed for the RNF-03 failover scenario).
         options.AbortOnConnectFail = false;
 
-        services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(options));
+        // TryAdd: Infrastructure.Messaging registers the same multiplexer (same server, D2 default).
+        services.TryAddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(options));
         services.AddHostedService<RedisConnectionWarmup>();
 
         services.AddHealthChecks()
