@@ -18,6 +18,14 @@ public sealed class IngestionSettings
     /// TODO(Diogo): confirm with the supervisor which behaviour the thesis describes.
     /// </summary>
     public bool RejectWholeBatchOnInvalid { get; set; }
+
+    /// <summary>
+    /// How far in the future (relative to the API's clock) a sensor <c>timestamp</c> may be. A later timestamp is
+    /// rejected: the read model keeps only the newest event of a spot, so one event dated in the future would freeze
+    /// the spot until that date, and a rebuild would pick it again (review of Phase 4, cache finding 3).
+    /// Default 5 minutes. TODO(Diogo): confirm the tolerance for sensor clock drift (Cap. 3).
+    /// </summary>
+    public TimeSpan MaxClockSkew { get; set; } = TimeSpan.FromMinutes(5);
 }
 
 /// <summary>An event of the batch that failed RF-01 validation, by position in the request array.</summary>
@@ -75,7 +83,7 @@ public sealed class IngestOccupancyBatchHandler(
 
         foreach (var item in body.EnumerateArray())
         {
-            var message = OccupancyEventValidator.Validate(item, receivedAt, out var errors);
+            var message = OccupancyEventValidator.Validate(item, receivedAt, settings.MaxClockSkew, out var errors);
             if (message is null)
             {
                 rejected.Add(new RejectedEvent(index, OccupancyEventValidator.TryReadEventId(item), errors));
