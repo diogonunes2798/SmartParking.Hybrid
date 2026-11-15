@@ -32,6 +32,9 @@ A especificação completa está em `docs/ESPECIFICACAO.md`. Lê-a antes de qual
 ```bash
 docker compose up -d                 # PostgreSQL, MongoDB, Redis (+ broker, se ativo)
 docker compose --profile observability up -d   # + Prometheus em http://localhost:9090
+dotnet tool restore                  # dotnet-ef fixado no manifesto local (dotnet-tools.json)
+dotnet ef database update --project src/SmartParking.Infrastructure.Relational --startup-project src/SmartParking.Api
+dotnet ef migrations add <Nome> --project src/SmartParking.Infrastructure.Relational --startup-project src/SmartParking.Api --output-dir Migrations
 dotnet build
 dotnet test                          # Microsoft.Testing.Platform (global.json); precisa do Docker (Testcontainers)
 dotnet test --project tests/SmartParking.ArchitectureTests   # um único projeto de testes

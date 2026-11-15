@@ -1,0 +1,4 @@
+# EF Core migrations are generated code: exclude them from the analyzers (TreatWarningsAsErrors)
+# instead of hand-editing them, so they can be regenerated as is.
+[*.cs]
+generated_code = true

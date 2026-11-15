@@ -41,6 +41,11 @@ public static class ServiceDefaultsExtensions
         1, 1.5, 2, 2.5, 5, 10,
     ];
 
+    // Instrumentation names emitted natively by Npgsql and EF Core (System.Diagnostics), referenced by name so
+    // that ServiceDefaults does not depend on storage drivers (ADR-0001).
+    private const string NpgsqlInstrumentationName = "Npgsql";
+    private const string EntityFrameworkCoreMeterName = "Microsoft.EntityFrameworkCore";
+
     /// <summary>Tags to pass to the infrastructure registrations so their checks join readiness.</summary>
     public static IReadOnlyList<string> ReadinessTags { get; } = [ReadyTag];
 
@@ -61,11 +66,14 @@ public static class ServiceDefaultsExtensions
                 .AddAttributes([new("deployment.environment.name", builder.Environment.EnvironmentName)]))
             .WithTracing(tracing => tracing
                 .AddSource(SmartParkingTelemetry.ActivitySourceName)
+                // Database spans of PostgreSQL (Npgsql emits them natively): decompose latency per engine.
+                .AddSource(NpgsqlInstrumentationName)
                 // Probes and scrapes would drown the traces that matter for the measurements.
                 .AddAspNetCoreInstrumentation(o => o.Filter = ctx => !IsInfrastructurePath(ctx.Request.Path))
                 .AddHttpClientInstrumentation())
             .WithMetrics(metrics => metrics
                 .AddMeter(SmartParkingTelemetry.MeterName)
+                .AddMeter(NpgsqlInstrumentationName, EntityFrameworkCoreMeterName)
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation()
