@@ -50,6 +50,15 @@ public sealed class UniqueConstraintException : ConflictException
     }
 }
 
+/// <summary>No tariff is in force for the zone and instant of a session, so it cannot be priced (UC-02).</summary>
+public sealed class NoTariffInForceException : ConflictException
+{
+    public NoTariffInForceException(string message, Exception? innerException = null)
+        : base(message, innerException)
+    {
+    }
+}
+
 /// <summary>A referenced row is missing, or a row cannot be deleted because others depend on it.</summary>
 public sealed class ReferentialIntegrityException : ConflictException
 {

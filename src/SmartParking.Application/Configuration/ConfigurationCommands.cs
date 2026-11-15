@@ -10,7 +10,7 @@ namespace SmartParking.Application.Configuration;
 // each with its create/update/delete commands; reads go through IConfigurationQueries.
 // TODO(Phase 2b/5): relevant changes must emit events for the read model (spec §4, RF-06) through the outbox.
 
-internal static class Concurrency
+internal static class Concurrency // shared with the UC-02 handlers (same assembly)
 {
     /// <summary>
     /// Rejects an update based on a stale read. A change made between this check and the commit is still
