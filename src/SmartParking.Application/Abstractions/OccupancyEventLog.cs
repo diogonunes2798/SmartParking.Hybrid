@@ -1,3 +1,4 @@
+using SmartParking.Application.Analytics;
 using SmartParking.Domain.Occupancy;
 
 namespace SmartParking.Application.Abstractions;
@@ -44,6 +45,21 @@ public interface IOccupancyEventLog
     /// model (ADR-0008). Read-only: the log itself is never changed.
     /// </summary>
     IAsyncEnumerable<LatestSpotEvent> GetLatestPerSpotAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The last event of every spot of one facility with <c>timestamp &lt; before</c>, however old: the state of each spot
+    /// at the start of an aggregation range (UC-04, ADR-0010). Without a lower bound, the state does not depend on where
+    /// the range starts, so re-aggregating any range gives the same rows (review of Phase 6, finding 2).
+    /// </summary>
+    Task<IReadOnlyList<LatestSpotEvent>> GetLatestPerSpotAsync(
+        Guid facilityId, DateTimeOffset before, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Every event of one facility with <c>since &lt;= timestamp &lt; until</c> (UC-04, ADR-0010), in no guaranteed order.
+    /// A range scan of the <c>(facilityId, timestamp)</c> index.
+    /// </summary>
+    Task<IReadOnlyList<SpotOccupancyEvent>> GetEventsAsync(
+        Guid facilityId, DateTimeOffset since, DateTimeOffset until, CancellationToken cancellationToken);
 }
 
 /// <summary>The last known event of one spot (rebuild of the read model).</summary>

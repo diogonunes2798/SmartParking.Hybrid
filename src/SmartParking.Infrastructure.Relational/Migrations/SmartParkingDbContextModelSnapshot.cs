@@ -433,6 +433,79 @@ namespace SmartParking.Infrastructure.Relational.Migrations
                     b.ToTable("vehicles", (string)null);
                 });
 
+            modelBuilder.Entity("SmartParking.Infrastructure.Relational.Analytics.AggregationCheckpoint", b =>
+                {
+                    b.Property<string>("Name")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<DateTimeOffset>("Position")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("position");
+
+                    b.HasKey("Name")
+                        .HasName("pk_aggregation_checkpoints");
+
+                    b.ToTable("aggregation_checkpoints", "analytics");
+                });
+
+            modelBuilder.Entity("SmartParking.Infrastructure.Relational.Analytics.OccupancyHourlyRow", b =>
+                {
+                    b.Property<DateTimeOffset>("HourStart")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("hour_start");
+
+                    b.Property<Guid>("FacilityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("facility_id");
+
+                    b.Property<DateTimeOffset>("AggregatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("aggregated_at");
+
+                    b.Property<long>("AvailableSeconds")
+                        .HasColumnType("bigint")
+                        .HasColumnName("available_seconds");
+
+                    b.Property<int>("EventCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("event_count");
+
+                    b.Property<long>("OccupiedSeconds")
+                        .HasColumnType("bigint")
+                        .HasColumnName("occupied_seconds");
+
+                    b.Property<int>("SpotCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("spot_count");
+
+                    b.Property<string>("Zone")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("zone");
+
+                    b.HasKey("HourStart", "FacilityId")
+                        .HasName("pk_occupancy_hourly");
+
+                    b.HasIndex("Zone", "HourStart")
+                        .HasDatabaseName("ix_occupancy_hourly_zone_hour_start");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("Zone", "HourStart"), new[] { "EventCount", "OccupiedSeconds", "AvailableSeconds" });
+
+                    b.ToTable("occupancy_hourly", "analytics", t =>
+                        {
+                            t.HasCheckConstraint("ck_occupancy_hourly_available", "available_seconds = spot_count::bigint * 3600");
+
+                            t.HasCheckConstraint("ck_occupancy_hourly_events", "event_count >= 0");
+
+                            t.HasCheckConstraint("ck_occupancy_hourly_occupied", "occupied_seconds BETWEEN 0 AND available_seconds");
+
+                            t.HasCheckConstraint("ck_occupancy_hourly_spot_count", "spot_count >= 0");
+                        });
+                });
+
             modelBuilder.Entity("SmartParking.Infrastructure.Relational.Auditing.AuditEntry", b =>
                 {
                     b.Property<Guid>("Id")

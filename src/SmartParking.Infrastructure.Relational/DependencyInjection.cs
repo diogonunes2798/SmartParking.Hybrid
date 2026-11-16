@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using SmartParking.Application.Abstractions;
+using SmartParking.Application.Analytics;
 using SmartParking.Application.Availability;
 using SmartParking.Application.Configuration;
 using SmartParking.Application.Sessions;
@@ -11,6 +12,7 @@ using SmartParking.Domain.Facilities;
 using SmartParking.Domain.Sessions;
 using SmartParking.Domain.Tariffs;
 using SmartParking.Domain.Users;
+using SmartParking.Infrastructure.Relational.Analytics;
 using SmartParking.Infrastructure.Relational.Auditing;
 using SmartParking.Infrastructure.Relational.Outbox;
 using SmartParking.Infrastructure.Relational.Persistence;
@@ -75,6 +77,9 @@ public static class DependencyInjection
         services.AddScoped<IParkingSessionRepository, EfParkingSessionRepository>();
         services.AddScoped<ITariffLookup, EfTariffLookup>();
         services.AddScoped<IConfigurationQueries, EfConfigurationQueries>();
+        services.AddScoped<IAnalyticsFacilitySource, EfAnalyticsFacilitySource>(); // UC-04 aggregation (Phase 6, ADR-0010)
+        services.AddScoped<IOccupancySummaryStore, EfOccupancySummaryStore>();
+        services.AddScoped<IOccupancyReportQueries, EfOccupancyReportQueries>(); // reads analytics.* only
         services.AddScoped<IAvailabilitySource, EfAvailabilitySource>(); // read model rebuild (Phase 4, ADR-0008)
         services.AddScoped<ISessionQueries, EfSessionQueries>();
         services.TryAddSingleton<IOutboxStore, NpgsqlOutboxStore>(); // outbox relay (Phase 5, ADR-0009)

@@ -3,6 +3,7 @@ using SmartParking.Domain.Facilities;
 using SmartParking.Domain.Sessions;
 using SmartParking.Domain.Tariffs;
 using SmartParking.Domain.Users;
+using SmartParking.Infrastructure.Relational.Analytics;
 using SmartParking.Infrastructure.Relational.Auditing;
 using SmartParking.Infrastructure.Relational.Outbox;
 
@@ -33,6 +34,11 @@ public sealed class SmartParkingDbContext(DbContextOptions<SmartParkingDbContext
     public DbSet<AuditEntry> AuditLog => Set<AuditEntry>();
 
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
+    /// <summary>Hourly occupancy summary (schema <c>analytics</c>, UC-04, D4, ADR-0010).</summary>
+    public DbSet<OccupancyHourlyRow> OccupancyHourly => Set<OccupancyHourlyRow>();
+
+    public DbSet<AggregationCheckpoint> AggregationCheckpoints => Set<AggregationCheckpoint>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
