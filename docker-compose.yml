@@ -90,6 +90,19 @@ services:
       - "4317:4317"
       - "4318:4318"
 
+  # Load generator (Phase 9a, decision D6 = k6). Run only by bench/run.sh (`docker compose --profile bench run --rm k6`),
+  # never started by `up`. A container instead of a host install so that the k6 version is pinned here like every other
+  # image. Requests reach the API on the host through host.docker.internal, which adds the Docker Desktop network hop
+  # to every measured latency (recorded in docs/DIARIO.md, Phase 9a).
+  k6:
+    image: grafana/k6:1.4.2@sha256:3656673de3f30424e8ebcfa46acd9558d83b6a43612d0f668ffeac953950c6c7
+    profiles: ["bench"]
+    volumes:
+      - ./bench/k6:/scripts:ro
+      - ./results:/results
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   postgres-data:
   mongo-data:
