@@ -39,7 +39,7 @@ Até à Fase 6, o `payload` já era um objeto JSON opaco em todo o caminho do UC
 
 5. **Tipos numéricos estáveis.** O MongoDB guarda `21` como Int32 e `21.0` como Double (diário da Fase 3). O simulador escreve sempre os valores decimais com uma casa decimal, para que cada campo tenha um único tipo BSON. Um leitor de dados de sensores reais não pode assumir o mesmo. Tem de aceitar Int32, Int64 e Double (`$toDouble` nas agregações).
 
-6. **Demonstração com o `tools/SensorSimulator`.** A proporção de sensores da geração 2 sobe durante a execução (`gen2InitialRatio` → `gen2Ratio`, numa rampa). Cada sensor tem um limiar fixo dado pela semente e, uma vez na geração 2, não volta atrás, como numa substituição gradual de sensores. As chegadas usam um fluxo aleatório separado do das leituras. Assim, a carga (instantes, lugares, tipos, ids) é a mesma qualquer que seja a proporção da geração 2, e a única diferença entre execuções comparáveis é o `payload`.
+6. **Demonstração com o `tools/SensorSimulator`.** A proporção de sensores da geração 2 sobe durante a execução (`gen2InitialRatio` → `gen2Ratio`, numa rampa). Cada sensor tem um limiar fixo dado pela semente e, uma vez na geração 2, não volta atrás, como numa substituição gradual de sensores. Uma rampa a descer (proporção inicial maior do que a final) é recusada na validação (revisão de código da Fase 7, L2). As chegadas usam um fluxo aleatório separado do das leituras. Assim, a carga (instantes, lugares, tipos, ids) é a mesma qualquer que seja a proporção da geração 2, e a única diferença entre execuções comparáveis é o `payload`.
 
 7. **O simulador não referencia `src/`.** Copia apenas os contratos HTTP de que precisa. Exercita o contrato público, tal como um sensor ou um *gateway* de terceiros.
 
@@ -61,4 +61,4 @@ Até à Fase 6, o `payload` já era um objeto JSON opaco em todo o caminho do UC
   - o log fica com documentos de formas diferentes, e cada leitor tem de lidar com isso;
   - um campo novo colocado fora do `payload` perde-se em silêncio.
   - Mitigação possível, ainda não implementada: um contador de propriedades de topo desconhecidas na API. `TODO(Diogo)`: decidir se vale a pena para a tese.
-- **A medir na Fase 9** (cenário `schema-evolution`, 5 execuções): indisponibilidade (pedidos sem resposta ou recusados durante a transição) e latência D7 antes, durante e depois da rampa, comparadas com a migração da variante monolítica. O ensaio piloto da Fase 7 está no diário.
+- **A medir na Fase 9** (cenário `schema-evolution`, 5 execuções): indisponibilidade (pedidos sem resposta ou recusados durante a transição) e latência D7 antes, durante e depois da rampa, comparadas com a migração da variante monolítica. O ensaio piloto da Fase 7 está no diário e em `results/schema-evolution-pilot/`. Indisponibilidade em segundos ainda não foi medida: o piloto só mostra 0 erros e 0 pedidos sem resposta numa execução.

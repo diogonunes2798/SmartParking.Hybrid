@@ -1176,7 +1176,7 @@ Os ficheiros foram copiados para o *scratchpad* antes de cada mutação e restau
 
 - **Leitura honesta:**
   - Não houve erros nem pedidos sem resposta durante a transição. A latência D7 ficou muito abaixo de 1 s (RNF-01) em todas as fases.
-  - O p95 «depois da rampa» subiu um *bucket* (0,20 → 0,25 s), mas essa fase inclui os cerca de 2 470 FREED do `--free-at-end`, todos enviados no mesmo instante (achado 6 da revisão). Com estes dados, **não é possível atribuir a diferença à geração 2**.
+  - O p95 «depois da rampa» subiu um *bucket* (0,20 → 0,25 s), mas essa fase inclui os 2 449 FREED do `--free-at-end` (número corrigido na revisão de código; antes estava «cerca de 2 470»), todos enviados no mesmo instante (achado 6 da revisão). Com estes dados, **não é possível atribuir a diferença à geração 2**.
   - A precisão também é limitada: *buckets* de 50 ms e fronteiras das fases com cerca de 15 s de incerteza.
   - É uma execução única (n = 1), sem valor estatístico. A medição oficial (5 execuções, `--free-at-end false`, comparação com a migração monolítica) é o cenário `schema-evolution` da Fase 9.
 
@@ -1200,7 +1200,7 @@ Os ficheiros foram copiados para o *scratchpad* antes de cada mutação e restau
     - 5, Ctrl+C perdia o resumo.
   - **Documentados:** 6 a 11.
   - **Testes novos:** `Run_is_marked_saturated_when_the_offered_load_was_not_kept` e `Cancelled_run_is_never_clean`. As correções 1, 3 e 4 não têm teste unitário próprio (dependem de tempo e de falhas de rede); foram verificadas no resumo da execução a 5 000 ev/s.
-- **Revisão de código do *diff*** (passo 6 do fluxo por fase): ainda não foi feita.
+- **Revisão de código do *diff*** (passo 6 do fluxo por fase): feita depois dos primeiros commits; ver «Revisão independente do código e correções», no fim desta fase.
 
 ### O que ficou por medir
 
@@ -1220,3 +1220,60 @@ Os ficheiros foram copiados para o *scratchpad* antes de cada mutação e restau
   - medir a latência D7 com amostragem mais fina ou com *traces*, e não com *buckets* de 50 ms;
   - esvaziar `smartparking:domain-events` antes de cada cenário (da Fase 6).
 - **Dados de teste locais:** o MongoDB e o PostgreSQL de desenvolvimento ficaram com cerca de 313 000 eventos e com os parques `sim-adhoc-*` e `sim-schema-evolution-pilot-*`. Limpar antes da Fase 9 (`docker compose down -v`), se se quiser partir do zero.
+
+### Revisão independente do código e correções (antes do PR)
+
+Revisão do *diff* `af2725a..1912308` por um subagente separado (`docs/revisoes/fase-7-revisao-codigo.md`). Encontrou 0 achados altos, 4 médios, 7 baixos e 4 afirmações erradas nos documentos. M1, M2 e M3 foram reproduzidos de forma independente (execução em seco e procura no código). O Diogo pediu para corrigir todos.
+
+- **M1, dois eventos do mesmo lugar no mesmo milissegundo:** no `d8-reference.json` (semente 42) havia dois pares a 0,29 ms e a 0,43 ms. O read model desempata pelo `eventId`, que é aleatório, e podia deixar o lugar ocupado. Correção: intervalo mínimo de 1 ms por lugar (`MinGapSeconds`); os FREED de fecho passam a ficar 1 ms depois do fim. Tem teste, e a mutação sem o intervalo é apanhada.
+- **M2, fases do primeiro piloto desfasadas:** o script usava a última amostra antes de cada fronteira (de 15 em 15 s). As fases reais foram cerca de 0–285, 285–345 e 345–630 s, e não 0–300, 300–360 e 360–630 s como estava escrito acima. As contagens do CSV (4 745 / 986 / 6 741) coincidem com esses cortes na execução em seco. O CSV passou a chamar-se `2026-11-16_1416.csv` e os rótulos foram corrigidos; os valores não mudaram. **A tabela «Latência D7 por fase» acima tem por isso os rótulos errados:** onde diz «antes da rampa (0–300 s)», «rampa (300–360 s)» e «depois da rampa (360–630 s)», deve ler-se 0–285 s, 285–345 s e 345–630 s. O script passou a ler o histograma exatamente nas fronteiras.
+- **M3:** `--provision false` não fazia nada. Agora só procura, e termina com o código 3 se faltar algo.
+- **M4:** todos os cenários punham o primeiro parque no ponto dos testes de integração. Agora há um bloco do mapa por cenário (FNV-1a do nome), e a espera pelo read model usa a localização real devolvida pela API.
+- **L1 a L7:**
+  - tratamento de argumentos e erros (`peakWindows` nulo, semente fora do intervalo de `long`, `--scenario` sem valor, Ctrl+C na provisão);
+  - rampa a descer recusada;
+  - código de saída 4 para execuções saturadas;
+  - «aceite» explicado no resumo e no README;
+  - o teste *golden* passou a fixar também um evento da geração 2;
+  - `--summary-csv` escreve o resumo no formato da §6.
+- **Documentos:**
+  - os FREED de fecho do primeiro piloto foram **2 449**, não «cerca de 2 470»;
+  - o RNF-04 na rastreabilidade deixou de dizer que a medição é desta fase;
+  - «0 s de indisponibilidade» foi substituído por «0 erros e 0 pedidos sem resposta», porque nenhuma medição está em segundos;
+  - os 1,44 milhões de eventos por dia da D8 são «sem contar os picos».
+
+### Problemas encontrados durante a correção
+
+1. **Ids repetidos entre execuções com parâmetros diferentes.** A verificação a 5 000 ev/s e o segundo piloto (14:46) usaram a mesma semente e o mesmo `--run 2`. O fluxo dos ids dependia só da semente e de `--run`, e os dois geraram os mesmos `eventId`. A API aceitou os 12 472 eventos do piloto com 202, mas o MongoDB guardou **0**, porque o índice único descartou-os todos como duplicados. O read model aceitou-os (deduplica por lugar), por isso a latência D7 até foi medida. O resumo do simulador não podia detetar isto: «aceite» é o 202 da API (achado L5). Correção: os ids dependem também de todos os parâmetros (`ScenarioOptions.Describe()`), com um teste de regressão. A mutação que retira essa dependência faz falhar 2 testes. O CSV desse piloto foi apagado.
+2. **Duas sessões do Claude a trabalhar na mesma fase ao mesmo tempo.** Depois de um reinício da sessão, ficaram duas sessões a corrigir a revisão. Cada uma correu o seu piloto contra a mesma API: 14:58–15:09 (`--run 2`, `--free-at-end false`) e 15:00–15:11 (`--run 3`). Nos dois casos, todos os eventos ficaram guardados por `eventId` (10 023 e 12 472). Mas o histograma D7 contou os eventos das duas execuções (20 709 no segundo), por isso a **latência desses dois pilotos está contaminada**. Os CSV ficaram em `results/` (`2026-11-16_1458.csv`, `2026-11-16_1500.csv`) com esta nota. Também foi interrompido aos ~60 s um piloto `--run 4` (15:11–15:12), sem CSV. O Diogo decidiu qual das sessões terminava a fase, e a outra parou.
+3. **Parar a tarefa não para o processo.** A primeira sessão julgou «órfão» o piloto que a outra estava a correr. Ao parar uma tarefa de fundo, é preciso confirmar na lista de processos que o `dotnet` filho também parou.
+4. **Bateria completa com a API ligada:** a compilação falha (DLL bloqueadas: `MSB3021`) e o `RedisUnreachableTests` falhou uma vez. Com a API e os Workers parados, a bateria passa (255/255).
+
+### Ensaio piloto de referência (15:14, `results/schema-evolution-pilot/2026-11-16_1514.csv`)
+
+Cenário `schema-evolution-pilot` com `--run 5 --free-at-end false`, sem outra carga na API (confirmado: o histograma contou exatamente os eventos enviados).
+
+- **Simulador:**
+  - 10 023 eventos enviados (gen1 7 660, gen2 2 363) em 4 842 pedidos; 10 023 aceites, **0 rejeitados, 0 erros, 0 sem resposta**;
+  - carga mantida (0 ms de espera no canal);
+  - pedidos: p50 1,2 ms, p95 1,7 ms; instante previsto → resposta: p95 104,3 ms;
+  - CPU do simulador: 2,83 s em 600 s (0,5 % de um núcleo).
+- **MongoDB:** contagem pelos `eventId` gerados em seco: **10 023 de 10 023** guardados; **2 363 de 2 363** gen2 com `temperature` (double), `airQuality` (int) e `noise` (double).
+- **Latência D7** (fronteiras exatas, limite superior do *bucket*):
+
+  | Fase | n | p50 | p95 | p99 |
+  |---|---|---|---|---|
+  | antes da rampa (0–300 s) | 4 978 | ≤ 0,15 s | ≤ 0,20 s | ≤ 0,25 s |
+  | rampa (300–360 s) | 991 | ≤ 0,15 s | ≤ 0,20 s | ≤ 0,25 s |
+  | depois da rampa (360–630 s) | 4 054 | ≤ 0,15 s | ≤ 0,20 s | ≤ 0,25 s |
+
+- **Leitura:**
+  - sem o lote de FREED de fecho e sem sobreposição, o p95 é igual nas três fases. A subida de um *bucket* vista no primeiro piloto não reapareceu, o que está de acordo com a explicação dada então (o lote final), mas não a prova;
+  - continua a ser uma execução única, com *buckets* de 50 ms;
+  - o que este ensaio mostra é: a transição para a geração 2 não causou erros, pedidos sem resposta nem perda de campos, e a latência D7 não mudou de forma visível. A medição do RNF-04 continua a ser a Fase 9.
+
+### Verificação final
+
+- `dotnet build`: sem avisos.
+- `dotnet test` (com a API e os Workers parados): **255 testes, 0 falhas** (35 s), dos quais 43 do simulador.
+- Mutações desta ronda: sem o intervalo mínimo → 1 teste falha; ids sem os parâmetros → 2 testes falham.
