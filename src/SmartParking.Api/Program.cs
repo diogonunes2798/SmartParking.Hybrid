@@ -5,6 +5,7 @@ using SmartParking.Infrastructure.Cache;
 using SmartParking.Infrastructure.Documents;
 using SmartParking.Infrastructure.Messaging;
 using SmartParking.Infrastructure.Relational;
+using SmartParking.Infrastructure.Relational.Monolithic;
 using SmartParking.ServiceDefaults;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -29,13 +30,23 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 // RFC 9457 response in every environment (review of Phase 2a, finding 1).
 builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
 
+// Persistence:Mode (spec §7, ADR-0012): the same handlers and endpoints over two infrastructures. In Monolithic mode,
+// MongoDB, Redis and the Redis Streams bus are not registered at all (no client, no readiness check).
 var readiness = ServiceDefaultsExtensions.ReadinessTags;
 builder.Services
     .AddApplicationHandlers(builder.Configuration)
-    .AddRelationalPersistence(builder.Configuration, readiness)
-    .AddDocumentPersistence(builder.Configuration, readiness)
-    .AddCacheStore(builder.Configuration, readiness)
-    .AddEventBus(builder.Configuration);
+    .AddRelationalPersistence(builder.Configuration, readiness);
+if (builder.Configuration.GetPersistenceMode() == PersistenceMode.Monolithic)
+{
+    builder.Services.AddMonolithicPersistence(builder.Configuration);
+}
+else
+{
+    builder.Services
+        .AddDocumentPersistence(builder.Configuration, readiness)
+        .AddCacheStore(builder.Configuration, readiness)
+        .AddEventBus(builder.Configuration);
+}
 
 var app = builder.Build();
 

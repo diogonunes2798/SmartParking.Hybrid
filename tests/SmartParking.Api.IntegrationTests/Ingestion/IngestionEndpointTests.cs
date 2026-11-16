@@ -110,7 +110,7 @@ public sealed class IngestionEndpointTests(IngestionFixture fixture)
     }
 
     /// <summary>Trap named in the phase brief: a string timestamp would break the (facilityId, timestamp) index.</summary>
-    [Fact]
+    [HybridFact]
     public async Task Stored_document_has_date_timestamp_uuid_ids_and_the_payload_as_received()
     {
         await using var _ = await fixture.StartOccupancyLogConsumerAsync();

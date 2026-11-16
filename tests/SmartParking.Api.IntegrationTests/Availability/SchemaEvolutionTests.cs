@@ -20,7 +20,7 @@ public sealed class SchemaEvolutionTests(AvailabilityFixture fixture)
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    [Fact]
+    [HybridFact]
     public async Task Generation_two_events_reach_MongoDB_with_the_new_fields_and_update_the_read_model()
     {
         // Mid-run step from generation 1 to "all generation 2", so that both generations travel in the same run.

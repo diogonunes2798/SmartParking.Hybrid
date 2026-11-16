@@ -26,7 +26,7 @@ public sealed class ReadModelReviewFixesTests(AvailabilityFixture fixture)
     private static readonly long T0 = new DateTimeOffset(2026, 11, 15, 10, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
 
     /// <summary>Finding 1: while a rebuild holds the lock, projector writes change nothing and a second rebuild fails.</summary>
-    [Fact]
+    [HybridFact]
     public async Task Rebuild_lock_refuses_projector_writes_and_a_second_rebuild()
     {
         var (facility, spots, _) = await fixture.SeedAsync(1);
@@ -56,7 +56,7 @@ public sealed class ReadModelReviewFixesTests(AvailabilityFixture fixture)
     /// writing all along. One rebuild wins, the other fails, the projector retries its refused writes, and the counters
     /// end equal to the spot states.
     /// </summary>
-    [Fact]
+    [HybridFact]
     public async Task Concurrent_rebuilds_and_projector_leave_counters_equal_to_spot_states()
     {
         var zone = $"zone-{Guid.NewGuid():N}";
@@ -129,7 +129,7 @@ public sealed class ReadModelReviewFixesTests(AvailabilityFixture fixture)
     /// yet, is missing from MongoDB. The rebuild moves the availability group back to what the log has, so the event
     /// is delivered again and the spot ends in its real state.
     /// </summary>
-    [Fact]
+    [HybridFact]
     public async Task Rebuild_redelivers_to_the_projector_what_the_log_does_not_have_yet()
     {
         var facility = await fixture.CreateFacilityAsync("Parque atraso do log", 40.2033, -8.4103, $"zone-{Guid.NewGuid():N}");
@@ -166,7 +166,7 @@ public sealed class ReadModelReviewFixesTests(AvailabilityFixture fixture)
     }
 
     /// <summary>Finding 5: a configuration event older than a delete, handled later, does not resurrect the spot.</summary>
-    [Fact]
+    [HybridFact]
     public async Task Late_spot_change_after_its_delete_is_stale_and_does_not_resurrect_it()
     {
         var (facility, spots, zone) = await fixture.SeedAsync(2);
@@ -189,7 +189,7 @@ public sealed class ReadModelReviewFixesTests(AvailabilityFixture fixture)
             await fixture.ReadModel.ApplyAsync([new OccupancyChange(Guid.NewGuid(), spots[0], SpotState.Occupied, T0)], Ct));
     }
 
-    [Fact]
+    [HybridFact]
     public async Task Late_facility_change_after_its_delete_is_stale_and_its_late_spots_are_ignored()
     {
         var (facility, spots, zone) = await fixture.SeedAsync(1);
@@ -208,7 +208,7 @@ public sealed class ReadModelReviewFixesTests(AvailabilityFixture fixture)
     }
 
     /// <summary>Finding 7: a payload that deserialises but breaks a domain rule is poison and writes nothing.</summary>
-    [Fact]
+    [HybridFact]
     public async Task Invalid_facility_event_is_poison_and_writes_nothing()
     {
         var facility = Guid.NewGuid();

@@ -13,7 +13,13 @@ name: smartparking-hybrid
 
 services:
   postgres:
-    image: postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106
+    # PostgreSQL 16.15 + PostGIS 3.5.7 (Phase 8, ADR-0012): the monolithic variant answers UC-03 with PostGIS. The same
+    # image serves both variants, so the comparison of Cap. 6.5 runs on the same engine build.
+    image: postgis/postgis:16-3.5-alpine@sha256:47e961a569fd52ff31f0fe205ed91eeab17d9f5fff6722e6d7ea6b588748b293
+    # The image's init script would create postgis, topology and tiger in «public»; the migration AddMonolithicSchema
+    # creates only postgis, in its own schema. An empty tmpfs hides the script (it runs only on a new data volume).
+    tmpfs:
+      - /docker-entrypoint-initdb.d
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-smartparking}
       POSTGRES_USER: ${POSTGRES_USER:-smartparking}

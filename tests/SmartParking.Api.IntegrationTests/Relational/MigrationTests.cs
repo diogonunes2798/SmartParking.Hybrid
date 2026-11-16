@@ -18,6 +18,11 @@ public sealed class MigrationTests(RelationalFixture fixture)
 
     private static readonly string[] ExpectedAnalyticsTables = ["aggregation_checkpoints", "occupancy_hourly"];
 
+    private static readonly string[] ExpectedMonolithTables = ["occupancy_events", "spot_state"];
+
+    private static Task<List<string>> ExtensionsAsync(SmartParkingDbContext db) =>
+        db.Database.SqlQueryRaw<string>("SELECT extname AS \"Value\" FROM pg_extension").ToListAsync(Ct);
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>
@@ -44,13 +49,18 @@ public sealed class MigrationTests(RelationalFixture fixture)
             Assert.Equal(db.Database.GetMigrations(), await db.Database.GetAppliedMigrationsAsync(Ct));
             Assert.Equivalent(ExpectedTables, await PublicTablesAsync(db), strict: true);
             Assert.Equivalent(ExpectedAnalyticsTables, await AnalyticsTablesAsync(db), strict: true);
+            // Phase 8: the monolithic variant's tables (partitions not counted) and PostGIS, outside «public».
+            Assert.Equivalent(ExpectedMonolithTables, (await TablesAsync(db, "monolith")).Where(t => !t.StartsWith("occupancy_events_", StringComparison.Ordinal)), strict: true);
+            Assert.Contains("postgis", await ExtensionsAsync(db));
 
             await db.GetService<IMigrator>().MigrateAsync(Migration.InitialDatabase, cancellationToken: Ct);
 
             Assert.Equal(["__ef_migrations_history"], await PublicTablesAsync(db));
             Assert.Empty(await db.Database
-                .SqlQueryRaw<string>("SELECT schema_name AS \"Value\" FROM information_schema.schemata WHERE schema_name = 'analytics'")
+                .SqlQueryRaw<string>(
+                    "SELECT schema_name AS \"Value\" FROM information_schema.schemata WHERE schema_name IN ('analytics', 'monolith', 'postgis')")
                 .ToListAsync(Ct));
+            Assert.DoesNotContain("postgis", await ExtensionsAsync(db));
         }
         finally
         {

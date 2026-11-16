@@ -25,7 +25,7 @@ public sealed class RedisUnreachableTests(IngestionFixture fixture)
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    [Fact]
+    [HybridFact]
     public async Task Api_starts_without_waiting_for_redis_and_ingestion_answers_503()
     {
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
@@ -56,7 +56,7 @@ public sealed class RedisUnreachableTests(IngestionFixture fixture)
         Assert.Equal(HttpStatusCode.ServiceUnavailable, ingest.StatusCode);
     }
 
-    [Fact]
+    [HybridFact]
     public async Task Consumer_host_starts_without_waiting_for_redis()
     {
         var watch = Stopwatch.StartNew();

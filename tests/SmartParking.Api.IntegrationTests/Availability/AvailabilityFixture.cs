@@ -56,8 +56,14 @@ public sealed class AvailabilityFixture : IAsyncLifetime
             await scope.ServiceProvider.GetRequiredService<SmartParkingDbContext>().Database.MigrateAsync();
         }
 
-        Redis = await ConnectionMultiplexer.ConnectAsync(_api.Redis.GetConnectionString() + ",allowAdmin=true"); // INFO in tests
+        if (!IsMonolithic)
+        {
+            Redis = await ConnectionMultiplexer.ConnectAsync(_api.Redis.GetConnectionString() + ",allowAdmin=true"); // INFO in tests
+        }
     }
+
+    /// <summary>Variant under test (Phase 8): in the monolithic one there is no Redis and no read model to seed.</summary>
+    public bool IsMonolithic => _api.IsMonolithic;
 
     public async ValueTask DisposeAsync()
     {
@@ -176,10 +182,25 @@ public sealed class AvailabilityFixture : IAsyncLifetime
 
     // ---- Direct read model setup (tests that exercise the read model without the bus) ----
 
-    /// <summary>A facility with <paramref name="spots"/> car spots, loaded straight into the read model.</summary>
+    /// <summary>
+    /// A facility with <paramref name="spots"/> spots of <paramref name="type"/>, all free. Hybrid: loaded straight into the
+    /// read model. Monolithic: created through the RF-06 API, which is all the availability query needs (no projection).
+    /// </summary>
     public async Task<(Guid Facility, Guid[] Spots, string Zone)> SeedAsync(
         int spots, double latitude = 40.2033, double longitude = -8.4103, VehicleType type = VehicleType.Car)
     {
+        if (IsMonolithic)
+        {
+            var created = await CreateFacilityAsync("Seeded", latitude, longitude, $"zone-{Guid.NewGuid():N}");
+            var spotIds = new Guid[spots];
+            for (var i = 0; i < spots; i++)
+            {
+                spotIds[i] = (await CreateSpotAsync(created.Id, type)).Id;
+            }
+
+            return (created.Id, spotIds, created.Zone);
+        }
+
         var ct = TestContext.Current.CancellationToken;
         var facility = Guid.NewGuid();
         var zone = $"zone-{Guid.NewGuid():N}";
@@ -194,6 +215,24 @@ public sealed class AvailabilityFixture : IAsyncLifetime
         }
 
         return (facility, ids, zone);
+    }
+
+    /// <summary>
+    /// Sets the state of a seeded spot as an occupancy event would. Hybrid: applied to the read model. Monolithic: appended
+    /// to the event table, which moves <c>spot_state</c> in the same transaction.
+    /// </summary>
+    public async Task SetStateAsync(Guid facility, Guid spot, SpotState state, DateTimeOffset at)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        if (IsMonolithic)
+        {
+            var type = state == SpotState.Occupied ? Domain.Occupancy.OccupancyEventType.Occupied : Domain.Occupancy.OccupancyEventType.Freed;
+            await Services.GetRequiredService<IOccupancyEventLog>().AppendAsync(
+                [new OccupancyEventRecord(Guid.NewGuid(), Guid.NewGuid(), spot, facility, type, at, "{}", at)], ct);
+            return;
+        }
+
+        await ReadModel.ApplyAsync([new OccupancyChange(Guid.NewGuid(), spot, state, at.ToUnixTimeMilliseconds())], ct);
     }
 
     public async Task<Dictionary<string, long>> HashAsync(RedisKey key)

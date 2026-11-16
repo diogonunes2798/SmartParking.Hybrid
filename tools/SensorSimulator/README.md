@@ -16,6 +16,8 @@ Os Workers são precisos por duas razões:
 - o relay da outbox e o projetor de configuração levam ao read model os lugares que o simulador cria;
 - sem eles, o simulador espera até `--wait-read-model` segundos e termina com o código 3.
 
+**Variante monolítica (Fase 8, ADR-0012).** O simulador é o mesmo; só muda o modo da API e dos Workers (`Persistence__Mode=Monolithic`) e o rótulo do CSV (`--variant monolithic`). Neste modo, os lugares criados ficam logo visíveis na consulta de disponibilidade, por isso a espera do read model termina de imediato. Para o UC-05 com migração, ver `bench/schema-evolution/monolithic_migration.py`.
+
 ## Utilização
 
 ```bash

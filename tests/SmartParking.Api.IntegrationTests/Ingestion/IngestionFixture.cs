@@ -13,7 +13,12 @@ using SmartParking.Infrastructure.Documents.OccupancyEvents;
 using SmartParking.Infrastructure.Messaging;
 using StackExchange.Redis;
 using Testcontainers.MongoDb;
+using Testcontainers.PostgreSql;
 using Testcontainers.Redis;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using SmartParking.Infrastructure.Relational;
+using SmartParking.Infrastructure.Relational.Monolithic;
 using DocumentsRegistration = SmartParking.Infrastructure.Documents.DependencyInjection;
 using CacheRegistration = SmartParking.Infrastructure.Cache.DependencyInjection;
 using RelationalRegistration = SmartParking.Infrastructure.Relational.DependencyInjection;
@@ -40,8 +45,22 @@ public sealed class IngestionFixture : IAsyncLifetime
 
     public IConnectionMultiplexer RedisConnection { get; private set; } = null!;
 
+    /// <summary>
+    /// Monolithic variant (Phase 8): PostgreSQL only, migrated; the API writes the events synchronously (no consumer).
+    /// Started only in that mode.
+    /// </summary>
+    public PostgreSqlContainer Postgres { get; } = ApiFixture.NewPostgres();
+
+    public static bool IsMonolithic => TestMode.IsMonolithic;
+
     public async ValueTask InitializeAsync()
     {
+        if (IsMonolithic)
+        {
+            await InitializeMonolithicAsync();
+            return;
+        }
+
         await Task.WhenAll(Mongo.StartAsync(), Redis.StartAsync());
 
         var mongo = Mongo.GetConnectionString();
@@ -62,6 +81,22 @@ public sealed class IngestionFixture : IAsyncLifetime
             .GetDatabase(DocumentsRegistration.DefaultDatabaseName)
             .GetCollection<BsonDocument>(MongoOccupancyEventLog.CollectionName);
         RedisConnection = await ConnectionMultiplexer.ConnectAsync(redis);
+    }
+
+    private async Task InitializeMonolithicAsync()
+    {
+        await Postgres.StartAsync();
+        var postgres = Postgres.GetConnectionString();
+        Factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment(ApiFixture.EnvironmentName);
+            builder.UseSetting(PersistenceModeConfiguration.Key, nameof(PersistenceMode.Monolithic));
+            builder.UseSetting($"ConnectionStrings:{RelationalRegistration.ConnectionStringName}", postgres);
+        });
+        Client = Factory.CreateClient();
+
+        await using var scope = Factory.Services.CreateAsyncScope();
+        await scope.ServiceProvider.GetRequiredService<SmartParkingDbContext>().Database.MigrateAsync();
     }
 
     /// <summary>
@@ -94,19 +129,41 @@ public sealed class IngestionFixture : IAsyncLifetime
     }
 
     /// <summary>Standard consumer of the API's stream (as in Workers), with short intervals for tests.</summary>
-    public Task<RunningConsumer> StartOccupancyLogConsumerAsync(string consumerName = "test-consumer") =>
-        StartConsumerAsync<OccupancyLogWriter>(o =>
+    /// <remarks>Monolithic variant: there is no consumer (the API stores the events itself), so an empty host stands in.</remarks>
+    public async Task<RunningConsumer> StartOccupancyLogConsumerAsync(string consumerName = "test-consumer")
+    {
+        if (IsMonolithic)
+        {
+            var host = Host.CreateApplicationBuilder().Build();
+            await host.StartAsync(TestContext.Current.CancellationToken);
+            return new RunningConsumer(host);
+        }
+
+        return await StartConsumerAsync<OccupancyLogWriter>(o =>
         {
             o.Stream = OccupancyEventMessage.Topic;
             o.Group = OccupancyLogConsumer.Name;
             o.ConsumerName = consumerName;
             o.PollInterval = TimeSpan.FromMilliseconds(20);
         });
+    }
 
-    public Task<long> CountAsync(Guid eventId) =>
-        Events.CountDocumentsAsync(
+    /// <summary>How many times the event is stored in the log of the variant under test (MongoDB, or the PostgreSQL table).</summary>
+    public async Task<long> CountAsync(Guid eventId)
+    {
+        if (IsMonolithic)
+        {
+            var command = Factory.Services.GetRequiredService<NpgsqlDataSource>()
+                .CreateCommand($"SELECT count(*) FROM {MonolithicSchema.OccupancyEvents} WHERE event_id = @id");
+            await using var _ = command;
+            command.Parameters.AddWithValue("id", eventId);
+            return (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
+        }
+
+        return await Events.CountDocumentsAsync(
             new BsonDocument("eventId", new BsonBinaryData(eventId, GuidRepresentation.Standard)),
             cancellationToken: TestContext.Current.CancellationToken);
+    }
 
     public Task<BsonDocument> FindAsync(Guid eventId) =>
         Events.Find(new BsonDocument("eventId", new BsonBinaryData(eventId, GuidRepresentation.Standard)))
@@ -125,7 +182,7 @@ public sealed class IngestionFixture : IAsyncLifetime
             await Factory.DisposeAsync();
         }
 
-        await Task.WhenAll(Mongo.DisposeAsync().AsTask(), Redis.DisposeAsync().AsTask());
+        await Task.WhenAll(Mongo.DisposeAsync().AsTask(), Redis.DisposeAsync().AsTask(), Postgres.DisposeAsync().AsTask());
     }
 
     /// <summary>Polls <paramref name="condition"/> until it holds or 15 s elapse.</summary>
@@ -178,5 +235,5 @@ public sealed class RunningConsumer(IHost host) : IAsyncDisposable
 [CollectionDefinition(Name)]
 public sealed class IngestionTestGroup : ICollectionFixture<IngestionFixture>
 {
-    public const string Name = "Ingestion (Redis + MongoDB)";
+    public const string Name = "Ingestion (Redis + MongoDB, or PostgreSQL in the monolithic variant)";
 }
