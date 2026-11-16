@@ -55,3 +55,9 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Phase 9a: process output of bench/run.sh (the CSV, meta.json and k6 summaries next to it are versioned)
+results/**/*.logs/
+
+# Python bytecode of the bench scripts
+__pycache__/

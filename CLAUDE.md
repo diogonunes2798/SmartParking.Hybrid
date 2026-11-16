@@ -45,7 +45,8 @@ dotnet run --project src/SmartParking.Api        # http://localhost:5080/swagger
 dotnet run --project src/SmartParking.Workers    # http://localhost:5090/health/ready, /metrics
 dotnet run --project tools/SensorSimulator -- --facilities 2 --spots 50 --rate 5 --duration 60 --seed 42   # precisa da Api e dos Workers
 dotnet run --project tools/SensorSimulator -- --scenario bench/scenarios/d8-reference.json            # cenários em bench/scenarios (README do simulador)
-./bench/run.sh <cenario>             # gera results/<cenario>/<data>.csv
+./bench/run.sh <cenario> [--variant hybrid|monolithic] [--runs 5] [--warmup 60]   # results/<cenario>/<data>.csv (+ meta.json, k6.json); apaga os volumes (down -v); ver bench/README.md
+python -m unittest discover -s bench/tests   # testes dos scripts de medição
 ```
 
 ## Estrutura da solução

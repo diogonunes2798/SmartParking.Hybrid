@@ -1,0 +1,63 @@
+{
+  "scenario": "smoke",
+  "variant": "hybrid",
+  "runs": 2,
+  "warmup_seconds": 60,
+  "command": "./bench/run.sh smoke --variant hybrid --runs 2 --warmup 60",
+  "started": "2026-11-16T21:23:58+00:00",
+  "git": {
+    "commit": "271212deba340fb9b1b3e72094efef02bac17763",
+    "branch": "phase-9a-bench-infra",
+    "uncommitted_changes": [],
+    "uncommitted_diff": ""
+  },
+  "environment": {},
+  "images": {
+    "postgres": "postgis/postgis:16-3.5-alpine@sha256:47e961a569fd52ff31f0fe205ed91eeab17d9f5fff6722e6d7ea6b588748b293",
+    "mongo": "mongo:7.0.48@sha256:9896df581dfd0718b7abe112f4c37598d0986c54060e4ec1384997e6503c8c71",
+    "redis": "redis:7.4.12-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe",
+    "prometheus": "prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06",
+    "jaeger": "jaegertracing/jaeger:2.11.0@sha256:b585df1b6299bbbd16bf7c679da30389349736e4b6bc8f4f500142a75bf26ca8",
+    "k6": "grafana/k6:1.4.2@sha256:3656673de3f30424e8ebcfa46acd9558d83b6a43612d0f668ffeac953950c6c7"
+  },
+  "tools": {
+    "dotnet_sdk": "10.0.404",
+    "docker": "29.0.1",
+    "docker_compose": "2.40.3-desktop.1",
+    "python": "3.14.10"
+  },
+  "machine": {
+    "os": "Windows-11-10.0.26100-SP0",
+    "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+    "logical_cpus": 12,
+    "memory_bytes": 25716453376,
+    "docker_cpus": "12",
+    "docker_memory_bytes": "12514971648"
+  },
+  "runs_detail": {
+    "1": {
+      "seed_seconds": "13",
+      "warmup_started": "21:24:34.427",
+      "warmup_k6_exit": "0",
+      "warmup_simulator_exit": "0",
+      "measure_started": "21:25:42.167",
+      "simulator_finished": "21:26:12.701",
+      "k6_finished": "21:26:13.892",
+      "k6_exit": "0",
+      "simulator_exit": "0"
+    },
+    "2": {
+      "seed_seconds": "12",
+      "warmup_started": "21:26:47.426",
+      "warmup_k6_exit": "0",
+      "warmup_simulator_exit": "0",
+      "measure_started": "21:27:55.399",
+      "simulator_finished": "21:28:25.902",
+      "k6_finished": "21:28:27.072",
+      "k6_exit": "0",
+      "simulator_exit": "0"
+    }
+  },
+  "finished": "2026-11-16T21:28:34+00:00",
+  "status": "ok"
+}

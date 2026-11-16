@@ -1389,3 +1389,89 @@ A mesma carga do ensaio híbrido de referência da Fase 7 (`2026-11-16_1514.csv`
   - métrica de repetições por *deadlock* no `PostgresEventBus`;
   - um *bucket* mais fino ou *traces* para o D7.
 - **Dados locais:** a base de desenvolvimento ficou em `AddEnvironmentalColumns`, com as tabelas `monolith.*` vazias. O MongoDB e o Redis mantêm os dados das fases anteriores.
+
+## 16-11-2026 — Fase 9a: infraestrutura de medição (§6, §9 passo 9)
+
+Objetivo: um comando por cenário que gere CSV comparáveis entre a variante híbrida e a monolítica. Os *scripts* só recolhem dados e não interpretam resultados. Ramo `phase-9a-bench-infra`, PR #10.
+
+### Preparação da máquina (passo 1 do guião)
+
+TODO(Diogo): registar aqui o estado da máquina durante a aceitação (21:23–21:34): browser e IDE fechados? carregador ligado? atualizações automáticas desligadas? A aceitação foi lançada a partir do Claude Code, com a aplicação de ambiente de trabalho aberta. O `meta.json` regista a máquina detetável: Windows 11 Pro 10.0.26100, 12 CPU lógicos (AMD Family 23 Model 113), 24 GiB de RAM; Docker Desktop com 12 CPU e cerca de 11,7 GiB.
+
+### Plano e decisões (antes do código)
+
+O Diogo aprovou o plano com as duas opções recomendadas:
+
+| Ponto | Escolha |
+|---|---|
+| k6 (D6, valor por omissão) | **contentor `grafana/k6:1.4.2`**, fixado por *tag* e *digest* no `docker-compose.yml` (perfil `bench`), e não uma instalação no anfitrião. Custo: os pedidos passam pela rede do Docker Desktop (`host.docker.internal`), o que soma esse salto a cada latência medida pelo k6. |
+| *Pool* do Npgsql (achado 1 da revisão da Fase 2b) | **`Maximum Pool Size=40` por processo**, na configuração versionada: API 40 + Workers 40 = 80, abaixo de `max_connections` = 100. |
+
+Os achados 3, 4 e 7 da revisão da Fase 2b (idas e voltas à BD por comando, índice `(zone, valid_from)`, `AddDbContextPool`) ficam para depois das primeiras medições. Só se tratam se um alvo do RNF-01 falhar (passo 6 do guião).
+
+### O que foi feito
+
+- `bench/run.sh <cenario> [--variant] [--runs 5] [--warmup 60] [--allow-dirty]`. Em cada execução:
+  - `down -v`/`up -d --wait`;
+  - migrações;
+  - API e Workers a partir das DLL de Release, com `ASPNETCORE_ENVIRONMENT=Benchmark` e o `Persistence__Mode` da variante;
+  - dados base D8 (20 parques e 5 000 lugares e sensores, através do simulador);
+  - aquecimento;
+  - parte medida;
+  - linhas no CSV da §6.
+- **Ambiente `Benchmark`** (`appsettings.Benchmark.json` na API e nos Workers): as mesmas credenciais do Development, mas sem o registo de cada instrução SQL, que o Development tem desde a Fase 6 e que somaria I/O a cada pedido medido.
+- **Recolha** (`bench/lib`): todos os recolhedores escrevem as colunas da §6, no formato `0.###` do simulador.
+  - `k6_to_csv.py`: todas as métricas do `--summary-export`, com sub-métricas por etiqueta.
+  - `e2e_latency.py`: janela do histograma D7, somando a API e os Workers, porque o histograma é registado nos Workers no híbrido e na API no monolítico.
+  - `relabel_csv.py`: o resumo do simulador, com o cenário e a execução do *bench*.
+  - `csv_row.py`: os códigos de saída.
+  - `write_meta.py`: *commit*, *diff*, ambiente, imagens, ferramentas e máquina.
+- **Cenário `smoke`**: 30 s de leituras do UC-03 com o k6 (20/s), em simultâneo com eventos do UC-01 do simulador (5/s), mais a janela D7. Serve para provar a cadeia; não é uma medição para a tese.
+- `.gitattributes` com `*.sh text eol=lf`, porque com `core.autocrlf=true` um `run.sh` em CRLF parte no bash.
+- Testes: `python -m unittest discover -s bench/tests` (12).
+
+### Problemas encontrados e tentativas falhadas
+
+- **Primeira execução: a API não arrancou** (`DirectoryNotFoundException`). Um `--contentRoot` relativo é resolvido a partir da pasta da DLL, não do diretório atual. Passou a absoluto, na forma nativa (`pwd -W`).
+- **O resumo do k6 exporta sozinho `http_req_duration{expected_response:true}`.** Com só o valor da etiqueta no nome, ficava `k6_http_req_duration_true_*`, que é ambíguo. Os nomes passaram a levar a chave e o valor: `..._expected_response_true_...` e `..._name_availability_...`.
+- **Um *gauge* do k6 (`vus`) era tratado como *trend***, porque também tem `min` e `max`. Um teste apanhou o erro antes da primeira medição.
+- **O primeiro *commit* deixou o `run.sh` sem bit de execução e sujeito a CRLF.** Corrigido com `git update-index --chmod=+x` e com o `.gitattributes`.
+- **A primeira aceitação foi deitada fora.** A revisão independente chegou durante essa execução e mostrou que a janela D7 estava contaminada (achados 1 e 2). Ao pará-la, o `TaskStop` terminou só o processo pai: o `run.sh` continuou vivo, e a API, os Workers e um contentor do k6 ficaram a ocupar as portas. Era exatamente o cenário dos achados 4 e 9, que foram corrigidos a seguir. Os processos foram identificados pelo PID (`dotnet.exe`) e terminados à mão. Os resultados parciais foram retirados de `results/` e não foram usados.
+- **Um ficheiro novo, ainda sem *commit* (o relatório da revisão), teria feito a sessão monolítica recusar-se a correr**, por árvore suja. Foi tirado do repositório até a aceitação terminar. Consequência prática: durante uma sessão de medição não se escreve no repositório, exceto em `results/`.
+- **No Windows, o `os.environ` põe em maiúsculas os nomes das variáveis**, por isso o `meta.json` regista `PERSISTENCE__MODE` e não `Persistence__Mode`. Não tem efeito: o Windows e a configuração do .NET ignoram maiúsculas e minúsculas nos nomes. O teste passou a comparar em maiúsculas.
+
+### Verificação (resultados reais)
+
+- `dotnet build`: 0 erros. `dotnet test`: **267 testes, 267 passam, 0 falhas** (antes das correções da revisão, que só tocaram em `bench/`).
+- `python -m unittest discover -s bench/tests`: 12 testes, OK.
+- Recusa com a porta 5080 ocupada (um `http.server` de Python): mensagem «something is already listening» e código de saída 2.
+- **Aceitação, *commit* `271212d`, árvore limpa:**
+  - comandos: `./bench/run.sh smoke --variant hybrid --runs 2` (21:23) e `./bench/run.sh smoke --variant monolithic --runs 2` (21:29);
+  - ficheiros: `results/smoke/2026-11-16_2123.csv` (híbrido) e `results/smoke/2026-11-16_2129.csv` (monolítico);
+  - cada um tem 242 linhas de dados com as 7 colunas, o resumo bruto do k6 por execução e um `meta.json` (`status: ok`, sem alterações por fazer *commit*, nenhuma variável de ambiente relevante herdada);
+  - todos os códigos de saída são 0, e não houve pedidos falhados no k6;
+  - em todas as execuções, `sim_sent` = `sim_accepted_202` = `e2e_events` = 140. Este resultado confirma que a janela D7 já não apanha eventos do aquecimento nem a rajada final;
+  - unidades usadas: `ms`, `events`, `requests`, `requests/s`, `ratio`, `samples`, `bytes`, `bytes/s`, `iterations`, `iterations/s`, `vus`, `code`, `bool`, `s`, `MiB`.
+- Os números do `smoke` não são para a tese: cada sessão tem só 2 execuções de 30 s, a taxas muito abaixo do D8. Não se interpretam aqui.
+
+### Revisões independentes (passo 6)
+
+`docs/revisoes/fase-9a-revisao-scripts-medicao.md`: 9 achados, sem nenhum alto.
+- Corrigidos em `327b34b`:
+  - a rajada final do simulador e os eventos do aquecimento dentro da janela D7;
+  - o desfasamento entre o k6 e o simulador (em parte);
+  - processos esquecidos nas portas;
+  - CSV de uma sessão falhada com aspeto de completo, e códigos de saída no CSV;
+  - lacunas do `meta.json`;
+  - `results/` a contar como alteração;
+  - contentor do k6 órfão.
+- O *pool* ficou registado na coluna `configuracao`. O dimensionamento para o `ingest-scale` fica para esse cenário.
+
+### Pontos a levar para os cenários seguintes
+
+- **`ingest-scale`:** com 4 instâncias de Workers, o *pool* de 40 por processo soma 200 ligações, acima de `max_connections` = 100. É preciso fixar o *pool* por processo no `run.sh` ou subir `max_connections` no *compose*, e registar o valor.
+- **`TODO(Diogo)`:**
+  - no monolítico toda a ingestão passa pelo *pool* da API (40). Isto é uma ameaça à validade da comparação (Cap. 6.5) ou faz parte do desenho da variante?
+  - confirmar a duração e a carga do aquecimento de cada cenário (60 s por omissão, com a mesma carga da parte medida).
+- O D7 continua a ser medido por limites superiores de *bucket* (50, 75, 100, 150, 200, 250 ms…). Para o `ingest-scale` pode ser preciso um *bucket* mais fino (ponto já levantado na Fase 8).
+- A latência do k6 inclui o salto da rede do Docker Desktop. Para separar este efeito, pode-se correr uma vez o mesmo *script* com um k6 instalado no anfitrião e comparar.
