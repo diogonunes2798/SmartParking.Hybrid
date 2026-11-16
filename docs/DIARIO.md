@@ -1069,3 +1069,154 @@ O que encontrei no código antes de começar:
   - `work_mem` do relatório anual; *index-only scan*;
   - testes do *hosted service* e das métricas `smartparking.analytics.*`, que ficaram sem teste.
 - **Fase 10 (RNF-05):** retenção do log de eventos. O estado inicial do *worker* é o último evento de cada lugar, por mais antigo que seja. Apagar eventos antigos por TTL pode apagar o único evento de um lugar parado há muito tempo. A retenção tem de manter o último evento de cada lugar, ou passar esse estado para uma tabela (`analytics.spot_state`).
+
+## 16-11-2026 — Fase 7: simulador e evolução de esquema (UC-05, RNF-04)
+
+Objetivo: um gerador de carga reprodutível e a demonstração de que uma nova geração de sensores entra sem paragem. Ramo `phase-7-simulator`.
+
+### Plano e decisões (antes do código)
+
+**D8 fechada.** O Diogo fechou a D8 com o valor por omissão:
+- 5 000 lugares, 1 evento por lugar a cada 5 min em média (5 000 / 300 = 16,67 eventos/s);
+- picos de 10× (166,7 eventos/s);
+- cerca de 1,44 milhões de eventos por dia.
+
+Fica em `bench/scenarios/d8-reference.json`. Estes são os valores a usar no Cap. 3. `TODO(Diogo):` o n.º de parques (20, isto é, 250 lugares por parque) não faz parte da D8 e foi escolhido só para repartir os lugares.
+
+Duas decisões do Diogo sobre o plano, ambas com a opção recomendada:
+- **Picos:** são janelas explícitas no ficheiro de cenário (`peakWindows`). Se o fator for maior que 1 e não houver janelas, usam-se os 10 % centrais da execução.
+- **Provisão:** o simulador cria os parques, os lugares e os sensores pela API de configuração (RF-06). Não há *seed* SQL, para que o caminho exercitado seja o real (outbox → *relay* → projetor de configuração).
+
+O que encontrei no código antes de começar:
+- **O `payload` já era opaco** em todo o caminho do UC-01 desde a Fase 3: validador → `OccupancyEventMessage` (`JsonElement`) → `BsonDocument.Parse`. O projetor do Redis e a agregação da Fase 6 leem só os campos de topo. A previsão era que o UC-05 não precisasse de nenhuma alteração em `src/`, e assim foi.
+- **Lugares desconhecidos são ignorados:** o read model descarta eventos de lugares que não conhece (`ApplyOutcome.UnknownSpot`). Por isso, o simulador tem de provisionar primeiro e esperar até o read model conhecer todos os lugares, o que verifica com `GET /api/availability`.
+- **ADR 0009 ocupado:** o guião pedia o «ADR 0009», mas esse número é o do *relay* da outbox. O registo desta fase é o **ADR-0011**. É a quinta fase seguida com este desencontro.
+- **Skill indisponível:** a skill `memory-allocation-analyzer` (passo 6 do guião) não está instalada nesta sessão. A revisão foi feita por um subagente separado (ver as revisões).
+
+### O que foi feito
+
+- **`tools/SensorSimulator`** (consola .NET 10, sem referências a `src/`):
+  - `ScenarioOptions`: as opções `--facilities`, `--spots` (total), `--rate` (taxa base fora de pico, em ev/s para a cidade toda), `--peak-factor`, `--duration`, `--gen2-ratio`, `--gen2-initial-ratio`, `--gen2-ramp-start`, `--gen2-ramp-duration`, `--seed`, `--run`, mais as de envio. O cenário JSON aceita comentários, e a linha de comandos sobrepõe-se ao ficheiro.
+  - `OccupancyEventGenerator`: chegadas de Poisson geradas por *thinning*, para que a mudança de taxa nas janelas de pico seja exata.
+    - Cada evento escolhe um lugar ao acaso e alterna o seu estado. Todos os lugares começam livres.
+    - Cada sensor tem um limiar fixo e passa a gen2 quando a proporção corrente o ultrapassa. Uma vez gen2, nunca volta atrás.
+    - Os fluxos aleatórios são independentes: mudar a proporção gen2 não muda a carga, e `--run` só muda os `eventId`.
+  - `Xoshiro256`: xoshiro256** em vez de `System.Random` (ver as decisões).
+  - `EventJsonWriter`: `Utf8JsonWriter` direto num *buffer* reutilizado. O `payload` leva `sensorGeneration` e, na gen2, `temperature`, `airQuality` e `noise`.
+  - `Provisioner`: idempotente, encontra o que já existe pelos nomes determinísticos.
+  - `LoadRunner`: ritmo em tempo real, lotes, canal limitado e concorrência.
+  - `RunSummary`: enviados, aceites, rejeitados, erros, latência, atraso de despacho, CPU e memória do próprio simulador.
+  - `--dry-run`: escreve a sequência em NDJSON, sem HTTP.
+- **Cenários:** `bench/scenarios/smoke.json`, `d8-reference.json` e `schema-evolution-pilot.json`.
+- **Script do piloto:** `bench/schema-evolution/pilot_latency.py` regista o histograma D7 dos Workers e escreve o CSV.
+- **Testes:**
+  - `tests/SmartParking.SensorSimulator.Tests` (30, unitários);
+  - `SchemaEvolutionTests` (integração, Testcontainers): o próprio simulador provisiona por RF-06, envia gen1 e depois gen2, e o teste verifica o MongoDB (os 3 campos com valor e tipo BSON) e o Redis (o último evento de cada lugar aplicado, todos FREE).
+- **Sem alterações em `src/`** (UC-05: confirmado pelo teste de ponta a ponta).
+
+Outras decisões tomadas durante a implementação (ADR-0011):
+- **`System.Random` não serve para a reprodutibilidade:** a documentação do .NET não garante a mesma sequência para a mesma semente entre versões do *runtime*. Foi escolhido o xoshiro256** com uma semente SplitMix64, numa implementação de cerca de 60 linhas.
+- **Uma casa decimal sempre:** `temperature` e `noise` são escritos sempre com uma casa decimal (`21.0`, não `21`). Assim, o MongoDB guarda sempre Double e não mistura Int32 com Double no mesmo campo (o problema de tipos registado na Fase 3).
+- **`--run`:** a Fase 9 repete cada cenário 5 vezes contra a mesma base de dados. Com a mesma semente, os `eventId` repetir-se-iam, e o log e o read model descartá-los-iam como duplicados, distorcendo a medição. `--run` muda só os ids.
+- **`--free-at-end` (por omissão ligado):** no fim, envia FREED para cada lugar ocupado. Sem isto, a execução seguinte começaria com metade dos lugares ocupados no read model e o simulador a pensar que estavam livres. Contrapartida: um lote de cerca de 2 500 eventos no mesmo instante (ver o piloto).
+
+### Como se testou que os testes apanham os erros (mutações)
+
+Os ficheiros foram copiados para o *scratchpad* antes de cada mutação e restaurados a partir da cópia. Confirmou-se que cada mutação compilava (`mutate.py`).
+
+| Mutação | Resultado |
+|---|---|
+| M1: o lugar não alterna (`occupied[spot] = true`) | apanhada (`A_spot_is_never_occupied_twice_in_a_row`) |
+| M2: chegadas com semente do relógio (`Environment.TickCount64`) | **sobreviveu na primeira versão**, apanhada depois de acrescentar `Seed_42_produces_the_recorded_sequence` |
+| M3: `noise` retirado do `payload` | apanhada (`Event_json_has_the_minimal_schema_and_the_gen2_payload` e `SchemaEvolutionTests`) |
+
+### Problemas encontrados e tentativas falhadas
+
+1. **O teste «mesma semente → mesma sequência» não apanhava uma semente do relógio (M2).** As duas execuções do teste correm no mesmo *tick* do `TickCount64` (cerca de 15 ms no Windows) e recebem a mesma semente. Correção: um teste com valores fixos («golden») para a semente 42: os 3 primeiros eventos, o último `eventId` e o total de 308. Este teste também fixa a sequência entre máquinas e versões do .NET.
+2. **Conflito de `Program`:** o teste de integração referencia a API e o simulador, e ambos tinham um `Program` global (*top-level statements*), o que deu `CS0433`. O simulador passou a ter `SimulatorProgram.Main` no seu *namespace*.
+3. **Nome em conflito no `Topology`:** um método estático e uma propriedade do *record* com o mesmo nome (`CS0102`). O método passou a chamar-se `MapSpotsToFacilities`.
+4. **Um teste que comparava o JSON gerado byte a byte** usava `Guid.NewGuid()` na topologia falsa e teria sempre falhado. Foi corrigido antes da primeira execução, com uma topologia determinística.
+5. **O comando `mongosh` do guião volta a falhar sem credenciais** («Command aggregate requires authentication»), como já tinha acontecido na Fase 3. É preciso `-u smartparking -p smartparking --authenticationDatabase admin`.
+6. **`sed` com barras invertidas no `.csproj`** não alterou nada, em silêncio. A edição foi feita com a ferramenta de edição.
+7. **Afirmação provisória corrigida:** a rastreabilidade do RNF-04 foi escrita enquanto o piloto corria, já com «0 erros durante a rampa». Confirmou-se depois com o resumo real (abaixo). Fica o registo de que o texto foi escrito antes do dado.
+
+### Verificação (resultados reais)
+
+- `dotnet build`: sem avisos nem erros.
+- `dotnet test` (antes da revisão): **239 testes, 0 falhas** (35 s).
+- Depois da revisão:
+  - `SmartParking.SensorSimulator.Tests`: 30/30;
+  - `SchemaEvolutionTests`: 1/1.
+
+**Teste manual (passo 4 do guião)**, com a API e os Workers a correr e o comando do guião (`--facilities 2 --spots 50 --rate 5 --duration 60 --seed 42`):
+- 308 eventos enviados, 308 aceites (202), 0 rejeitados, 0 erros, em 231 pedidos;
+- pedidos: p50 1,4 ms, p95 2,6 ms;
+- CPU do simulador: 0,92 s (1,5 % de um núcleo);
+- `db.occupancy_events.countDocuments()` passou de 7 para **315** (+308).
+- A provisão (2 parques, 50 lugares, 50 sensores) levou 1,8 s; o read model conhecia todos os lugares 1,1 s depois.
+
+**Ensaio piloto do UC-05 (passo 5 do guião)**, `bench/scenarios/schema-evolution-pilot.json`:
+- **Carga:** 5 000 lugares, 16,67 ev/s, 600 s.
+- **Rampa gen2:** de 0 % a 50 % entre os 300 s e os 360 s.
+- **Provisão:** 20 parques, 5 000 lugares e 5 000 sensores criados em 10,3 s.
+- **Simulador:**
+  - 12 472 eventos enviados (gen1 8 896, gen2 3 576), 12 472 aceites, **0 rejeitados, 0 erros, 0 pedidos sem resposta** (4 864 pedidos, todos 202);
+  - pedidos: p50 1,3 ms, p95 2,0 ms, máx. 23,4 ms;
+  - atraso máximo de despacho 111,4 ms (inclui a janela de 100 ms); 0 ms de espera no canal;
+  - CPU do simulador: 2,62 s em 600 s (0,4 % de um núcleo); 20,6 MiB alocados; GC 2/0/0.
+- **MongoDB:** 12 472 documentos do período. Dos 3 576 gen2, os 3 576 têm `temperature` (double), `airQuality` (int) e `noise` (double).
+- **Latência D7 por fase** (histograma dos Workers, amostrado a cada 15 s, `results/schema-evolution-pilot/2026-11-16_pilot.csv`). Os valores são o limite superior do *bucket*:
+
+  | Fase | n | p50 | p95 | p99 |
+  |---|---|---|---|---|
+  | antes da rampa (0–300 s) | 4 745 | ≤ 0,15 s | ≤ 0,20 s | ≤ 0,25 s |
+  | rampa (300–360 s) | 986 | ≤ 0,15 s | ≤ 0,20 s | ≤ 0,20 s |
+  | depois da rampa (360–630 s) | 6 741 | ≤ 0,15 s | ≤ 0,25 s | ≤ 0,30 s |
+  | execução completa | 12 472 | ≤ 0,15 s | ≤ 0,25 s | ≤ 0,30 s |
+
+- **Leitura honesta:**
+  - Não houve erros nem pedidos sem resposta durante a transição. A latência D7 ficou muito abaixo de 1 s (RNF-01) em todas as fases.
+  - O p95 «depois da rampa» subiu um *bucket* (0,20 → 0,25 s), mas essa fase inclui os cerca de 2 470 FREED do `--free-at-end`, todos enviados no mesmo instante (achado 6 da revisão). Com estes dados, **não é possível atribuir a diferença à geração 2**.
+  - A precisão também é limitada: *buckets* de 50 ms e fronteiras das fases com cerca de 15 s de incerteza.
+  - É uma execução única (n = 1), sem valor estatístico. A medição oficial (5 execuções, `--free-at-end false`, comparação com a migração monolítica) é o cenário `schema-evolution` da Fase 9.
+
+**Verificação da revisão:** 60 s a 5 000 ev/s, gen2 em rampa, `--free-at-end false`, contra a mesma API:
+- 300 162 eventos, todos aceites, 0 erros, 1 272 pedidos;
+- carga mantida em ciclo aberto, com 0 ms de espera no canal;
+- «Scheduled → answer»: p95 117,5 ms;
+- CPU do simulador: 1,89 s, ou seja, **3,1 % de um núcleo** (0,26 % das 12 lógicas); 6,6 MiB alocados.
+- Este valor de CPU é **mais alto** do que a estimativa do revisor (0,5–1,5 %) e do que o limiar que ele sugeriu (< 2 %). Continua a ser desprezável face à máquina.
+- Não se verificou se os Workers acompanharam esta carga (fora do âmbito desta verificação; é a Fase 9, `ingest-scale`).
+
+### Revisões independentes (passo 6)
+
+- **Alocações e CPU** (`docs/revisoes/fase-7-revisao-alocacoes.md`, subagente só de leitura, sem executar nada durante o piloto): 11 achados (2 altos, 3 médios, 3 baixos, 3 informativos).
+  - **Conclusão:** o CPU e as alocações não eram o problema. O problema era a **forma de medir**.
+  - **Corrigidos:**
+    - 1, omissão coordenada: a nova métrica «Scheduled → answer» parte do instante previsto;
+    - 2, execução saturada marcada «NOT KEPT»;
+    - 3, atraso de despacho subestimado depois de um bloqueio;
+    - 4, um *sender* que falhava deixava o despacho bloqueado para sempre;
+    - 5, Ctrl+C perdia o resumo.
+  - **Documentados:** 6 a 11.
+  - **Testes novos:** `Run_is_marked_saturated_when_the_offered_load_was_not_kept` e `Cancelled_run_is_never_clean`. As correções 1, 3 e 4 não têm teste unitário próprio (dependem de tempo e de falhas de rede); foram verificadas no resumo da execução a 5 000 ev/s.
+- **Revisão de código do *diff*** (passo 6 do fluxo por fase): ainda não foi feita.
+
+### O que ficou por medir
+
+- RNF-04 oficial: cenário `schema-evolution` com 5 execuções (`--run 1..5`), `--free-at-end false` e a mesma rampa, comparado com a migração da variante monolítica (Fase 8).
+- A capacidade dos Workers a 5 000 ev/s (atraso dos *streams*, D7 sob carga).
+
+### Pontos a levar para a próxima fase
+
+- **`TODO(Diogo)`:**
+  - n.º de parques do cenário D8;
+  - contador de propriedades de topo desconhecidas na API (ADR-0011, consequências);
+  - os sensores reais terão *heartbeats*? (vem da Fase 6).
+- **Fase 8 (variante monolítica):** o UC-05 faz-se com uma migração (`ALTER TABLE … ADD COLUMN` na tabela particionada). O simulador e o cenário servem para as duas variantes; só muda a API alvo.
+- **Fase 9:**
+  - correr com `--concurrency` suficiente e descartar as execuções marcadas «NOT KEPT»;
+  - registar o CPU do simulador em cada execução (já vem no resumo);
+  - medir a latência D7 com amostragem mais fina ou com *traces*, e não com *buckets* de 50 ms;
+  - esvaziar `smartparking:domain-events` antes de cada cenário (da Fase 6).
+- **Dados de teste locais:** o MongoDB e o PostgreSQL de desenvolvimento ficaram com cerca de 313 000 eventos e com os parques `sim-adhoc-*` e `sim-schema-evolution-pilot-*`. Limpar antes da Fase 9 (`docker compose down -v`), se se quiser partir do zero.

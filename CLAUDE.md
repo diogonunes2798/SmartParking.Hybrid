@@ -40,7 +40,8 @@ dotnet test                          # Microsoft.Testing.Platform (global.json);
 dotnet test --project tests/SmartParking.ArchitectureTests   # um único projeto de testes
 dotnet run --project src/SmartParking.Api        # http://localhost:5080/swagger, /health/ready, /metrics
 dotnet run --project src/SmartParking.Workers    # http://localhost:5090/health/ready, /metrics
-dotnet run --project tools/SensorSimulator -- --sensors 5000 --rate 200
+dotnet run --project tools/SensorSimulator -- --facilities 2 --spots 50 --rate 5 --duration 60 --seed 42   # precisa da Api e dos Workers
+dotnet run --project tools/SensorSimulator -- --scenario bench/scenarios/d8-reference.json            # cenários em bench/scenarios (README do simulador)
 ./bench/run.sh <cenario>             # gera results/<cenario>/<data>.csv
 ```
 
