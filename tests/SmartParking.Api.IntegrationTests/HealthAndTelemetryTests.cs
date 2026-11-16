@@ -27,7 +27,7 @@ public sealed class HealthAndTelemetryTests(ApiFixture fixture) : IClassFixture<
     }
 
     [Fact]
-    public async Task Readiness_is_healthy_when_all_storage_engines_are_up()
+    public async Task Readiness_is_healthy_when_all_storage_engines_of_the_variant_are_up()
     {
         var response = await _client.GetAsync("/health/ready", Ct);
 
@@ -35,7 +35,7 @@ public sealed class HealthAndTelemetryTests(ApiFixture fixture) : IClassFixture<
         var body = await response.Content.ReadFromJsonAsync<HealthResponse>(Ct);
         Assert.NotNull(body);
         Assert.Equal("Healthy", body.Status);
-        Assert.Equal(["mongodb", "postgres", "redis"], body.Checks.Select(c => c.Name).Order());
+        Assert.Equal(ApiFixture.ReadinessChecks(fixture.Mode), body.Checks.Select(c => c.Name).Order());
         Assert.All(body.Checks, c => Assert.Equal("Healthy", c.Status));
     }
 

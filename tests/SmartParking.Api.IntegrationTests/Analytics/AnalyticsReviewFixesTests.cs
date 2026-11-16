@@ -122,7 +122,7 @@ public sealed class AnalyticsReviewFixesTests(AnalyticsFixture fixture)
     /// Finding 1: the state before a range is read with a DISTINCT_SCAN on the (facilityId, spotId, timestamp, eventId)
     /// index (about one index entry per spot), not by reading every event of the facility.
     /// </summary>
-    [Fact]
+    [HybridFact]
     public async Task The_state_before_a_range_is_read_with_a_distinct_scan()
     {
         var zone = AnalyticsFixture.NewZone();

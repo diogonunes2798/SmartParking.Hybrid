@@ -18,7 +18,7 @@ public sealed class ReadModelConsistencyTests(AvailabilityFixture fixture)
 
     private static readonly long T0 = new DateTimeOffset(2026, 11, 15, 10, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
 
-    [Fact]
+    [HybridFact]
     public async Task Occupied_then_freed_restores_the_initial_counts()
     {
         var (facility, spots, zone) = await fixture.SeedAsync(3);
@@ -40,7 +40,7 @@ public sealed class ReadModelConsistencyTests(AvailabilityFixture fixture)
         Assert.Equal(initialZone, await fixture.ZoneCountersAsync(zone));
     }
 
-    [Fact]
+    [HybridFact]
     public async Task Same_event_applied_twice_changes_nothing_and_publishes_once()
     {
         var (facility, spots, zone) = await fixture.SeedAsync(2);
@@ -66,7 +66,7 @@ public sealed class ReadModelConsistencyTests(AvailabilityFixture fixture)
         Assert.Single(mine);
     }
 
-    [Fact]
+    [HybridFact]
     public async Task Older_event_arriving_late_is_ignored()
     {
         var (facility, spots, _) = await fixture.SeedAsync(1);
@@ -79,7 +79,7 @@ public sealed class ReadModelConsistencyTests(AvailabilityFixture fixture)
         Assert.Equal(0, (await fixture.FacilityCountersAsync(facility))["free"]);
     }
 
-    [Fact]
+    [HybridFact]
     public async Task Same_state_reported_again_moves_only_the_timestamp()
     {
         var (facility, spots, _) = await fixture.SeedAsync(1);
@@ -91,7 +91,7 @@ public sealed class ReadModelConsistencyTests(AvailabilityFixture fixture)
         Assert.Equal(T0 + 1, (long)await fixture.Db.HashGetAsync(ReadModelKeys.Spot(spots[0]), "ts"));
     }
 
-    [Fact]
+    [HybridFact]
     public async Task Event_for_an_unknown_spot_changes_nothing()
     {
         var outcome = await fixture.ReadModel.ApplyAsync([Change(Guid.NewGuid(), SpotState.Occupied, T0)], Ct);
@@ -102,7 +102,7 @@ public sealed class ReadModelConsistencyTests(AvailabilityFixture fixture)
     /// Several projectors applying the same shuffled events concurrently (as with 2–4 consumers, RNF-02): whatever
     /// the interleaving, each spot ends in the state of its newest event and the counters equal the spot states.
     /// </summary>
-    [Fact]
+    [HybridFact]
     public async Task Concurrent_out_of_order_application_keeps_counters_equal_to_spot_states()
     {
         var (facility, spots, zone) = await fixture.SeedAsync(20);
@@ -138,7 +138,7 @@ public sealed class ReadModelConsistencyTests(AvailabilityFixture fixture)
         Assert.Equal(expectedFree, (await fixture.ZoneCountersAsync(zone))["free"]);
     }
 
-    [Fact]
+    [HybridFact]
     public async Task State_change_is_published_on_the_availability_channel()
     {
         var (facility, spots, _) = await fixture.SeedAsync(1);

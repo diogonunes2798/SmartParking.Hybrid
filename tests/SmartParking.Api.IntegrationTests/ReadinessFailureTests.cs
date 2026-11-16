@@ -15,7 +15,8 @@ public sealed class ReadinessFailureTests
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    public static TheoryData<string> Engines => new("postgres", "mongodb", "redis");
+    // The engines of the variant under test (Phase 8): PostgreSQL only in the monolithic one.
+    public static TheoryData<string> Engines => new(ApiFixture.ReadinessChecks(TestMode.Current).ToArray());
 
     [Theory]
     [MemberData(nameof(Engines))]
@@ -36,7 +37,7 @@ public sealed class ReadinessFailureTests
     /// The API must start and answer readiness quickly even if Redis is already down at boot
     /// (the connection is opened at startup, not on the first probe).
     /// </summary>
-    [Fact]
+    [HybridFact]
     public async Task Api_starts_and_reports_unready_when_redis_is_down_at_boot()
     {
         await using var fixture = new ApiFixture();

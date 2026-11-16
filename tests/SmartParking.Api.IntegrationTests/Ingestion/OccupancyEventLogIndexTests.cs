@@ -13,7 +13,7 @@ public sealed class OccupancyEventLogIndexTests(IngestionFixture fixture)
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    [Fact]
+    [HybridFact]
     public async Task Log_has_unique_eventId_and_compound_facilityId_timestamp_indexes()
     {
         await fixture.Factory.Services.GetRequiredService<MongoOccupancyEventLog>().EnsureIndexesAsync(Ct);
@@ -27,7 +27,7 @@ public sealed class OccupancyEventLogIndexTests(IngestionFixture fixture)
         Assert.Equal(new BsonDocument { { "facilityId", 1 }, { "timestamp", 1 } }, compound["key"].AsBsonDocument);
     }
 
-    [Fact]
+    [HybridFact]
     public async Task Range_query_by_facility_and_time_uses_the_compound_index_and_orders_by_date()
     {
         var log = fixture.Factory.Services.GetRequiredService<IOccupancyEventLog>();

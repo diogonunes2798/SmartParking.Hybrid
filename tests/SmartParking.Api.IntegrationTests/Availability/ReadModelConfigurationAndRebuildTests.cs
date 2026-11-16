@@ -40,7 +40,7 @@ public sealed class ReadModelConfigurationAndRebuildTests(AvailabilityFixture fi
     /// New facility and spot (RF-06) → outbox → configuration topic (relay of Phase 5, simulated here) → projector:
     /// the facility appears in the GEO search with its spot free. Relaying the same rows again changes nothing.
     /// </summary>
-    [Fact]
+    [HybridFact]
     public async Task New_facility_and_spot_reach_the_read_model_through_the_outbox()
     {
         await using var workers = await fixture.StartWorkersAsync();
@@ -70,7 +70,7 @@ public sealed class ReadModelConfigurationAndRebuildTests(AvailabilityFixture fi
         Assert.Contains(found!, f => f["facilityId"].ToString() == facility.Id.ToString());
     }
 
-    [Fact]
+    [HybridFact]
     public async Task Zone_change_moves_the_counters_and_a_late_older_change_is_ignored()
     {
         var ct = Ct;
@@ -92,7 +92,7 @@ public sealed class ReadModelConfigurationAndRebuildTests(AvailabilityFixture fi
         Assert.Equal(newZone, (string?)await fixture.Db.HashGetAsync(ReadModelKeys.Facility(facility), "zone"));
     }
 
-    [Fact]
+    [HybridFact]
     public async Task Spot_type_change_and_delete_keep_counters_consistent()
     {
         var ct = Ct;
@@ -116,7 +116,7 @@ public sealed class ReadModelConfigurationAndRebuildTests(AvailabilityFixture fi
     }
 
     /// <summary>UC-01 end to end: API → stream → availability group → Redis, with the message on pub/sub.</summary>
-    [Fact]
+    [HybridFact]
     public async Task Ingested_event_updates_the_read_model_and_is_published()
     {
         var (facility, spots, _) = await fixture.SeedAsync(1);
@@ -144,7 +144,7 @@ public sealed class ReadModelConfigurationAndRebuildTests(AvailabilityFixture fi
     /// Rebuild from scratch: clears Redis, loads facilities and spots from PostgreSQL and applies the last event of
     /// each spot from MongoDB. The result equals the state built incrementally, and the meta key marks it loaded.
     /// </summary>
-    [Fact]
+    [HybridFact]
     public async Task Rebuild_from_postgres_and_mongo_reproduces_the_incremental_state()
     {
         var ct = Ct;

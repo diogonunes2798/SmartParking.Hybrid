@@ -17,7 +17,7 @@ public sealed class StreamConsumerRecoveryTests(IngestionFixture fixture)
     /// The consumer writes to MongoDB and is stopped before XACK. On restart (same consumer name) it re-reads its
     /// own pending entry, writes again (a duplicate key, i.e. a no-op) and acknowledges: one document, nothing pending.
     /// </summary>
-    [Fact]
+    [HybridFact]
     public async Task Consumer_stopped_before_ack_reprocesses_on_restart_without_duplicating()
     {
         var (stream, group) = NewStream();
@@ -43,7 +43,7 @@ public sealed class StreamConsumerRecoveryTests(IngestionFixture fixture)
     }
 
     /// <summary>The consumer that held the entry never comes back: another consumer claims it (XAUTOCLAIM).</summary>
-    [Fact]
+    [HybridFact]
     public async Task Entry_abandoned_by_a_dead_consumer_is_claimed_by_another()
     {
         var (stream, group) = NewStream();
@@ -70,7 +70,7 @@ public sealed class StreamConsumerRecoveryTests(IngestionFixture fixture)
         Assert.Equal(0, consumers.Single(c => c.Name == "worker-dead").PendingMessageCount);
     }
 
-    [Fact]
+    [HybridFact]
     public async Task Malformed_entry_goes_to_the_dead_letter_stream_and_does_not_block_the_next_ones()
     {
         var (stream, group) = NewStream();
@@ -89,7 +89,7 @@ public sealed class StreamConsumerRecoveryTests(IngestionFixture fixture)
         Assert.Equal(group, entry["group"].ToString());
     }
 
-    [Fact]
+    [HybridFact]
     public async Task Appending_the_same_record_twice_reports_a_duplicate_not_an_error()
     {
         var log = fixture.Factory.Services.GetRequiredService<IOccupancyEventLog>();
@@ -110,7 +110,7 @@ public sealed class StreamConsumerRecoveryTests(IngestionFixture fixture)
     /// Review of Phase 3, finding 4: a handler that always fails blocks the group (a transient failure is never
     /// dead-lettered, RNF-03), and that must be visible in the metrics, not only in the log.
     /// </summary>
-    [Fact]
+    [HybridFact]
     public async Task Handler_that_always_fails_keeps_the_entry_pending_and_is_counted_as_failures()
     {
         var (stream, group) = NewStream();

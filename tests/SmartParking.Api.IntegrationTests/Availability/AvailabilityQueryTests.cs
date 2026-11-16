@@ -9,7 +9,8 @@ using SmartParking.Infrastructure.Cache.Availability;
 namespace SmartParking.Api.IntegrationTests.Availability;
 
 /// <summary>
-/// UC-03 — <c>GET /api/availability</c> reads Redis GEO and hashes only. The coordinates are real places in
+/// UC-03 — <c>GET /api/availability</c>: Redis GEO and hashes in the hybrid variant, one PostGIS query in the monolithic
+/// one (Phase 8, same contract, run in both modes). The coordinates are real places in
 /// Coimbra (approximate), chosen so that swapping latitude and longitude changes the answer: «Portagem» is about
 /// 1.72 km from the centre of the query, but 2.19 km if the two coordinates were swapped (east–west distances
 /// shrink with cos(latitude) at 40° N, not at 8° S). A radius of 2 km must include it.
@@ -41,7 +42,7 @@ public sealed class AvailabilityQueryTests(AvailabilityFixture fixture)
         Assert.Equal([isec.Facility, portagem.Facility], found.Select(f => f.FacilityId)); // nearest first
         Assert.DoesNotContain(found, f => f.FacilityId == coimbraB.Facility);
 
-        // Distances computed by Redis agree with the haversine distance of the real points (±1 %): a swap of
+        // Distances computed by Redis (or PostGIS on a sphere, about 0.03 % apart) agree with the haversine distance of the real points (±1 %): a swap of
         // latitude and longitude would give 2191 m for Portagem.
         Assert.InRange(found[1].DistanceMeters, Portagem.Metres * 0.99, Portagem.Metres * 1.01);
         Assert.InRange(found[0].DistanceMeters, Isec.Metres * 0.99, Isec.Metres * 1.01);
@@ -58,7 +59,7 @@ public sealed class AvailabilityQueryTests(AvailabilityFixture fixture)
         Assert.Contains(wide, f => f.FacilityId == coimbraB.Facility);
     }
 
-    [Fact]
+    [HybridFact]
     public async Task Geo_set_stores_longitude_then_latitude()
     {
         var seeded = await fixture.SeedAsync(1, Portagem.Lat, Portagem.Lon);
@@ -74,8 +75,8 @@ public sealed class AvailabilityQueryTests(AvailabilityFixture fixture)
     {
         var cars = await fixture.SeedAsync(2, Isec.Lat, Isec.Lon, VehicleType.Car);
         var electric = await fixture.SeedAsync(3, Isec.Lat, Isec.Lon, VehicleType.Electric);
-        await fixture.ReadModel.ApplyAsync(
-            [new OccupancyChange(Guid.NewGuid(), electric.Spots[0], SpotState.Occupied, 1_763_200_000_000)], Ct);
+        await fixture.SetStateAsync(
+            electric.Facility, electric.Spots[0], SpotState.Occupied, DateTimeOffset.FromUnixTimeMilliseconds(1_763_200_000_000));
 
         var found = await GetAsync($"/api/availability?lat={Lat}&lon={Lon}&radius=2000&type=Electric");
 

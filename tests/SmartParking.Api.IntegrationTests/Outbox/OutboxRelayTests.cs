@@ -36,7 +36,7 @@ public sealed class OutboxRelayTests(AvailabilityFixture fixture)
     /// of its 7 rows (or all of them, but before the commit). On restart nothing is lost (every row ends processed and
     /// the read model is complete) and nothing is applied twice (7 «applied», the republished rows are «stale»).
     /// </summary>
-    [Theory]
+    [HybridTheory]
     [InlineData(3)]
     [InlineData(int.MaxValue)] // everything published, the commit never happened
     public async Task Relay_stopped_mid_batch_loses_nothing_and_the_read_model_applies_each_event_once(int publishedBeforeCrash)
@@ -86,7 +86,7 @@ public sealed class OutboxRelayTests(AvailabilityFixture fixture)
     /// batch (review of Phase 5, finding 4): with a plain <c>FOR UPDATE</c> (no <c>SKIP LOCKED</c>) the second instance
     /// would wait for those locks instead, and the first one times out.
     /// </summary>
-    [Fact]
+    [HybridFact]
     public async Task Two_relays_in_parallel_never_publish_the_same_row_twice()
     {
         var ids = await InsertSessionRowsAsync(500);
@@ -118,7 +118,7 @@ public sealed class OutboxRelayTests(AvailabilityFixture fixture)
     }
 
     /// <summary>The trace of the HTTP request continues in the relay and in the projector (traceparent, ADR-0009).</summary>
-    [Fact]
+    [HybridFact]
     public async Task Trace_continues_from_the_http_request_to_the_consumer()
     {
         await DrainAsync();
@@ -166,7 +166,7 @@ public sealed class OutboxRelayTests(AvailabilityFixture fixture)
     /// Review of Phase 5, finding 2: rows written outside a traced operation start one root span each, instead of becoming
     /// children of the previous row's span (one chain, unrelated events in one trace).
     /// </summary>
-    [Fact]
+    [HybridFact]
     public async Task Rows_without_trace_context_start_independent_traces()
     {
         await DrainAsync();
@@ -190,7 +190,7 @@ public sealed class OutboxRelayTests(AvailabilityFixture fixture)
     }
 
     /// <summary>Metric names the Phase 9 scripts read, the sub-second buckets and the D7 target from configuration.</summary>
-    [Fact]
+    [HybridFact]
     public async Task Consistency_window_publish_lag_and_targets_are_exposed_on_metrics()
     {
         // Buckets are cumulative and the meter is shared with the rest of the collection, so a non-zero bucket proves
@@ -228,7 +228,7 @@ public sealed class OutboxRelayTests(AvailabilityFixture fixture)
         Assert.DoesNotContain(lines, l => l.Contains("consistency_window_p95", StringComparison.Ordinal)); // TODO(Diogo)
     }
 
-    [Fact]
+    [HybridFact]
     public async Task Session_events_go_to_the_domain_events_topic_and_configuration_events_to_the_read_model_topic()
     {
         Assert.Equal(OutboxTopics.DomainEvents, OutboxTopics.For(nameof(SessionStarted)));
