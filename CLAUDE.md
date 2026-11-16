@@ -38,6 +38,9 @@ dotnet ef migrations add <Nome> --project src/SmartParking.Infrastructure.Relati
 dotnet build
 dotnet test                          # Microsoft.Testing.Platform (global.json); precisa do Docker (Testcontainers)
 dotnet test --project tests/SmartParking.ArchitectureTests   # um único projeto de testes
+Persistence__Mode=Monolithic dotnet test   # testes funcionais na variante monolítica (ADR-0012); PowerShell: $env:Persistence__Mode="Monolithic"
+Persistence__Mode=Monolithic dotnet run --project src/SmartParking.Api       # variante só PostgreSQL (Api e Workers com o mesmo modo)
+dotnet ef database update AddMonolithicSchema --project src/SmartParking.Infrastructure.Relational --startup-project src/SmartParking.Api   # sem a migração do UC-05 (ensaio da Fase 8)
 dotnet run --project src/SmartParking.Api        # http://localhost:5080/swagger, /health/ready, /metrics
 dotnet run --project src/SmartParking.Workers    # http://localhost:5090/health/ready, /metrics
 dotnet run --project tools/SensorSimulator -- --facilities 2 --spots 50 --rate 5 --duration 60 --seed 42   # precisa da Api e dos Workers

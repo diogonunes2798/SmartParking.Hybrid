@@ -1277,3 +1277,115 @@ Cenário `schema-evolution-pilot` com `--run 5 --free-at-end false`, sem outra c
 - `dotnet build`: sem avisos.
 - `dotnet test` (com a API e os Workers parados): **255 testes, 0 falhas** (35 s), dos quais 43 do simulador.
 - Mutações desta ronda: sem o intervalo mínimo → 1 teste falha; ids sem os parâmetros → 2 testes falham.
+
+
+## 16-11-2026 — Fase 8: variante monolítica (§7, Cap. 6.5)
+
+Objetivo: a mesma API a correr só com PostgreSQL, para a comparação da secção 6.5, numa baseline bem feita e não propositadamente fraca. Ramo previsto: `phase-8-monolithic` (os commits esperam pela verificação do Diogo).
+
+### Plano e decisões (antes do código)
+
+O Diogo aprovou o plano e escolheu, nos quatro pontos, a opção recomendada:
+
+| Ponto | Escolha |
+|---|---|
+| Consulta geográfica | **PostGIS** com índice espacial (não a fórmula de Haversine em SQL) |
+| `IEventBus` em PostgreSQL | **escrita síncrona**: o evento e o estado do lugar são gravados numa transação antes do 202 (não uma fila com consumidores) |
+| Disponibilidade | **tabela `spot_state`** mantida na mesma transação (não o último evento calculado do log a cada pedido) |
+| UC-05 | **só colunas tipadas**, sem `jsonb`, e migração que acrescenta `temperature`, `air_quality` e `noise` |
+
+O que encontrei antes de começar:
+- **ADR 0010 ocupado.** O guião pedia o «ADR 0010», mas esse número é o das tabelas de resumo (Fase 6). O registo desta fase é o **ADR-0012**. É a sexta fase seguida com este desencontro.
+- **Ferramentas indisponíveis.** O agente `dotnet-architecture-reviewer` e a skill `ef-migration-reviewer` (passo 6) não estão instalados nesta sessão. As revisões foram feitas por dois subagentes gerais com o mesmo enunciado.
+- **Os testes estavam muito ligados ao híbrido.** Dos 144 testes de integração, 37 testam internos do Redis, dos *streams* ou do MongoDB (chaves, *consumer groups*, planos do MongoDB). Não fazem sentido no modo monolítico e passaram a ser `[HybridFact]`. Os outros correm nos dois modos.
+
+### O que foi feito
+
+- **`Persistence:Mode`** (`Hybrid` por omissão; um valor desconhecido falha no arranque), lido só nos dois *composition roots*. No modo monolítico, a API e os Workers não registam MongoDB, Redis, *streams*, projetores nem reconstrução. A *readiness* verifica só o PostgreSQL, e `rebuild-read-model` termina com o código 1.
+- **`Infrastructure.Relational/Monolithic/`:**
+  - `PostgresEventBus`, `MonolithicOccupancyStore`, `PostgresAvailabilityQueries`;
+  - `OccupancyPartitionMaintenance`, `EnvironmentalColumnsProbe`, `MonolithicOptions`, `MonolithicRegistration`;
+  - nos Workers, `PartitionMaintenanceService`.
+- **Migrações:**
+  - `AddMonolithicSchema`: PostGIS no *schema* `postgis`; `monolith.occupancy_events` particionada por mês, com DEFAULT e os mesmos índices do log MongoDB; a função de partições; `spot_state` com `fillfactor = 70`; o índice GiST de expressão em `parking_facilities`;
+  - `AddEnvironmentalColumns` (UC-05), com `lock_timeout = 5s`.
+- **Imagem:** `postgis/postgis:16-3.5-alpine`, fixada por digest, nas duas variantes. Um `tmpfs` vazio em `/docker-entrypoint-initdb.d` esconde o script da imagem, no `docker compose` e nos testes.
+- **Testes:**
+  - `TestMode` lê `Persistence__Mode`; `HybridFact` e `HybridTheory` marcam os testes só híbridos;
+  - `ApiFixture`, `IngestionFixture` e `AvailabilityFixture` sabem correr em modo monolítico, sem arrancar o MongoDB nem o Redis e sem lhes passar *connection strings*. Se algum serviço híbrido ainda estivesse registado, a API falharia no arranque;
+  - `MonolithicVariantTests` (12 testes) corre sempre em modo monolítico, com o seu próprio contentor;
+  - `MigrationTests` verifica os *schemas* novos e o `Down()`.
+- **Ensaio:** `bench/schema-evolution/monolithic_migration.py` (aplica a migração a meio da carga e amostra os *locks*); `pilot_latency.py` ganhou `--variant`; o SQL da migração foi gerado para `bench/schema-evolution/monolithic-add-environmental-columns.sql`.
+- **ADR-0012**, `CLAUDE.md` (comandos), README do simulador, `appsettings.json` da API e dos Workers.
+
+### Como se testou que os testes apanham os erros (mutações)
+
+Cada ficheiro foi copiado para o *scratchpad* antes da mutação e reposto a partir da cópia. Em cada mutação, confirmei que o padrão existia uma única vez e que o projeto compilava.
+
+| Mutação | Teste que falhou |
+|---|---|
+| Sem a guarda `WHERE (s."timestamp", s.event_id) < …` no *upsert* do `spot_state` | `A_late_event_does_not_overwrite_a_newer_state_and_a_repeat_is_a_duplicate` |
+| Expressão geográfica da consulta sem `ST_SetSRID` (deixa de coincidir com o índice) | `The_availability_query_can_use_the_gist_index_on_the_facility_location` |
+| Um serviço do StackExchange.Redis registado no modo monolítico | `The_container_has_no_hybrid_service_and_readiness_checks_only_postgres` |
+| Ordem ascendente na sonda do *skip scan* | `The_skip_scan_state_before_an_instant_equals_the_direct_distinct_on` |
+
+### Problemas encontrados e tentativas falhadas
+
+- **Voltei a usar um *heredoc* com `python -`** para um *script* de edição, contra a regra registada desde a Fase 6. O comando ficou pendurado 2 min até ser parado. A edição foi feita depois com o Edit e com *scripts* em ficheiro (`< /dev/null`). É a quarta vez que este erro aparece no diário.
+- **Uma constante `short` dentro de um *raw string* interpolado `const`** não compila (CS0133: só *strings* são constantes nesse contexto). O valor `2` (FREED) ficou literal no SQL, com referência a `MonolithicSchema.Freed` no comentário.
+- **A extensão PostGIS em `public` partia o teste das migrações.** O script de arranque da imagem cria `postgis`, `topology` e `tiger` em `public`, e com eles a tabela `spatial_ref_sys`. O teste que espera em `public` só a tabela de histórico, depois de um `Down()` completo, falharia. Solução: esconder o script com `tmpfs`, criar o PostGIS no *schema* `postgis` e qualificar todas as chamadas.
+- **Uma falha que só aparecia com a suite completa no modo híbrido.** `OutboxRelayTests.Consistency_window_publish_lag_and_targets_are_exposed_on_metrics` passava sozinho e falhava (2 vezes em 2) com todos os testes. A causa foi o novo `MonolithicFixture`: o seu *host* cria os mesmos instrumentos «SmartParking» e, ao ser descartado com as suas métricas, o OpenTelemetry deixava de exportar os instrumentos com o mesmo nome nos outros *hosts*. É o mesmo efeito da Fase 5. Solução: dar a esse *fixture* uma `IMeterFactory` que vive tanto quanto o processo.
+- **A imagem PostGIS traz o PostgreSQL 16.15**, uma versão abaixo do 16.16 usado até à Fase 7. O volume de dados existente arrancou sem problemas (mesma versão maior). A comparação usa a mesma imagem nas duas variantes, mas os resultados das Fases 1 a 7 foram obtidos com o 16.16.
+- **A migração `AddMonolithicSchema` foi alterada depois de aplicada** à base de desenvolvimento (correções da revisão). A base foi levada de volta a `AddOccupancyHourlySummary` e atualizada de novo. Os dados do ensaio perderam-se, mas o CSV já estava escrito.
+- **A primeira versão do ensaio não registava as linhas na DEFAULT.** O achado 3 da revisão chegou durante a execução. A contagem (0) foi feita à mão depois do ensaio, e o *script* passa a registá-la.
+
+### Verificação (resultados reais)
+
+- `dotnet build`: sem erros nem avisos.
+- `Persistence__Mode=Monolithic dotnet test`: **264 testes, 226 passam, 38 ignorados, 0 falhas.** Os 38 ignorados são internos do Redis/MongoDB (`HybridFact`/`HybridTheory`).
+- `Persistence__Mode=Hybrid dotnet test`: **267 testes, 267 passam, 0 falhas.** O total é diferente porque a teoria da *readiness* tem 3 linhas no modo híbrido e 1 no monolítico.
+- **Ensaio manual** com a API e os Workers em modo monolítico: as duas *readiness* com o `postgres` como única verificação. Os Workers criaram as partições no arranque.
+
+### Ensaio do UC-05 no modo monolítico (passo 5; 20:12, `results/schema-evolution-pilot/2026-11-16_2011.csv`)
+
+A mesma carga do ensaio híbrido de referência da Fase 7 (`2026-11-16_1514.csv`): cenário `schema-evolution-pilot`, `--run 5`, `--free-at-end false`, 5 000 lugares, 16,67 ev/s, rampa da geração 2 de 0 % a 50 % entre os 300 s e os 360 s. A base estava em `AddMonolithicSchema`. A migração `AddEnvironmentalColumns` foi aplicada aos **t0 + 305,0 s**, com `psql` dentro do contentor.
+
+| | Híbrido (Fase 7, 15:14) | Monolítico (Fase 8, 20:11) |
+|---|---|---|
+| Eventos enviados / aceites | 10 023 / 10 023 | 10 023 / 10 023 |
+| Rejeitados, erros, sem resposta | 0, 0, 0 | 0, 0, 0 |
+| Guardados | 10 023 (MongoDB) | 10 023 (`monolith.occupancy_events`) |
+| Leituras da geração 2 guardadas | 2 363 de 2 363 | **2 360 de 2 363** |
+| Pedidos HTTP: p50 / p95 / máx. | 1,2 ms / 1,7 ms / — | 3,9 ms / 5,9 ms / 114,2 ms |
+| Instante previsto → resposta, p95 | 104,3 ms | 107,8 ms |
+| D7 p95 antes / durante / depois da rampa | ≤ 0,20 / ≤ 0,20 / ≤ 0,20 s | ≤ 0,15 / ≤ 0,15 / ≤ 0,15 s |
+| Migração | nenhuma | 0,468 s de parede (código 0) |
+
+- **Bloqueios:** 1 909 amostras de `pg_stat_activity` (cerca de uma a cada 10 ms) durante 20 s à volta da migração, **sem nenhuma sessão à espera de *lock***. A esta taxa (16,7 ev/s, inserções de poucos ms), a tabela está quase sempre livre, por isso o `ACCESS EXCLUSIVE` foi obtido de imediato. Os 0,468 s incluem o arranque do `docker compose exec` e do `psql`; o `ALTER` em si é só de catálogo.
+- **Erros e indisponibilidade:** 0 pedidos com erro e 0 sem resposta durante toda a execução, incluindo a migração.
+- **Perda de dados:** 3 leituras da geração 2 ficaram sem colunas. Chegaram entre o início da rampa (300 s) e o primeiro evento gravado com `temperature` (t0 + 310,8 s: migração aos 305 s, mais até 5 s até a escrita detetar as colunas novas). No híbrido não se perdeu nenhuma. Antes da migração, o esquema explícito não tem onde as guardar.
+- **Partição DEFAULT:** 0 linhas. 10 023 eventos ocupam 3,5 MB na partição de novembro.
+- **Leitura, com cuidado:**
+  - é uma execução única, com *buckets* de 50 ms;
+  - a latência D7 dos dois lados não mede exatamente a mesma coisa. No monolítico mede-se até ao *commit*; no híbrido, até à atualização do Redis depois do bus;
+  - esta execução usou a regra antiga de amostragem do D7 (todos os eventos inseridos), antes da correção M1. Como o simulador não gera eventos atrasados, o efeito deve ser pequeno, mas não foi medido;
+  - **a esta carga, a migração do monolítico não causou uma indisponibilidade observável.** O custo que o RNF-04 compara é, por agora, a perda de 3 leituras e o passo operacional, e não uma paragem. Falta ver se o mesmo acontece no pico de 10× e com a tabela grande (Fase 9). Com inserções concorrentes, o `ACCESS EXCLUSIVE` pode ficar na fila e parar a ingestão até ao `lock_timeout` de 5 s.
+
+### Revisões independentes (passo 6)
+
+`docs/revisoes/fase-8-revisao-arquitetura-e-migracoes.md`:
+- **Arquitetura:** só a infraestrutura muda, e não há achados altos. Foram corrigidos M1 (regra de amostragem do D7), M3 (três testes que não precisavam de estar marcados como só híbridos, mais o teste do 503), L1 (verificação das colunas depois de um `Down()`), L2 (lugares desconhecidos) e L6 (comentários). M2 (o log monolítico guarda menos) ficou documentado, com um `TODO(Diogo)`.
+- **Migrações:** um achado **alto**. O estado antes de um instante usava `DISTINCT ON`, que no PostgreSQL 16 lê todo o histórico do parque, e passou a usar um *skip scan* recursivo, com teste e mutação. Também foram corrigidos o `lock_timeout` na criação de partições (2), o aviso da DEFAULT (3), a ordem na inserção (6) e o 42703 (7). Os restantes ficaram documentados no ADR-0012.
+
+### Pontos a levar para a próxima fase
+
+- **`TODO(Diogo)`:**
+  - coluna `sensor_generation` na tabela monolítica (M2)?
+  - confirmar com o orientador a ameaça à validade «PostgreSQL com `jsonb` também dispensaria a migração» (ADR-0012).
+- **Fase 9:**
+  - repetir o ensaio do UC-05 nas duas variantes, 5 vezes, também no pico de 10× e com a tabela já grande;
+  - repetir os resultados híbridos na imagem nova (PostgreSQL 16.15);
+  - dimensionar o *pool* do Npgsql face às `max_connections` (revisão da Fase 2b). No monolítico, toda a ingestão passa pelo *pool* da API, por isso o problema aparece mais cedo;
+  - métrica de repetições por *deadlock* no `PostgresEventBus`;
+  - um *bucket* mais fino ou *traces* para o D7.
+- **Dados locais:** a base de desenvolvimento ficou em `AddEnvironmentalColumns`, com as tabelas `monolith.*` vazias. O MongoDB e o Redis mantêm os dados das fases anteriores.
