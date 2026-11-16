@@ -898,3 +898,151 @@ Todas as mutações foram repostas a partir de cópias e não com `git checkout`
   - a ligação do *relay* conta no dimensionamento do *pool* (lembrete já registado);
   - ações da análise de lacunas.
 - **`TODO(Diogo)`:** alvo da janela de consistência; D7 com um valor único na tese (1 s ou 2 s), que agora é só uma alteração de configuração.
+
+## 16-11-2026 — Fase 6: analítica (UC-04, RF-05) com tabelas de resumo (D4)
+
+Objetivo: relatórios de ocupação que leem só tabelas de resumo, isolados das tabelas operacionais. A D4 fica no valor por omissão (agregados periódicos em PostgreSQL). Ramo `phase-6-analytics`.
+
+### Plano e decisões (antes do código)
+
+O plano foi aprovado pelo Diogo com as quatro recomendações:
+
+1. **Taxa de ocupação:** Σ minutos-lugar ocupados ÷ Σ minutos-lugar disponíveis. Os minutos disponíveis são o n.º de lugares × a duração do período. Dia, semana e mês são a razão das somas das horas, nunca a média das taxas. `TODO(Diogo):` confirmar no Cap. 3, que não está no repositório.
+2. **Fuso horário:** tudo é guardado em UTC, uma linha por hora UTC. Dia, semana ISO e mês são cortados no calendário de Europe/Lisbon (`Reports:TimeZone`).
+3. **Denominador:** os lugares registados no momento da agregação, guardados na linha (`spot_count`). O campo `Capacity` não é usado.
+4. **Âmbito:** o consumidor de `smartparking:domain-events` (sessões e pagamentos), deixado pela Fase 5 «para a Fase 6», **fica fora**. O UC-04 da especificação é sobre a ocupação.
+
+O que encontrei no código antes de começar:
+- **ADR 0008 ocupado:** o guião pedia o ADR 0008, mas esse número já é o do *read model*. O registo desta fase é o **ADR-0010**. É a quarta fase seguida com este desencontro.
+- **Zona fora dos eventos:** os eventos no MongoDB não têm a zona, que está no parque, em PostgreSQL. O *worker* copia-a para cada linha de resumo, para que o relatório não precise de *joins*.
+- **Estado no início da hora:** um carro que chega às 9h50 conta na hora das 10h. Por isso, o *worker* procura o estado de cada lugar no início do intervalo. Na primeira versão, a procura ia só até 24 h para trás (`StateLookback`); a revisão de código mostrou que isso tornava a reagregação dependente da janela, e o limite foi retirado (ver as correções).
+- **Skill não ativa:** a `ef-index-advisor` está instalada (plugin `dotnet-ai-toolkit`), mas não estava ativa na sessão. Li o `SKILL.md` e apliquei-a à mão.
+
+### O que foi feito
+
+- **Application (`Analytics/`):**
+  - `OccupancyIntervalCalculator`: cálculo puro por hora, com as regras do ADR-0010, ponto 4;
+  - `OccupancyAggregator`: janelas fechadas (`AllowedLateness` de 2 min), reagregação das últimas 2 horas, checkpoint, máximo de 24 horas por execução e o comando manual;
+  - `OccupancyReport` (validação do pedido, `OccupancyReportService`, fim de cada período em `TimeZoneInfo`);
+  - `AnalyticsMetrics` (`smartparking.analytics.runs`, `.rows`, `.duration` e `.staleness`);
+  - `IsoInstant` (datas ISO 8601 estritas, partilhado com o comando).
+  - O `IOccupancyEventLog` ganhou duas leituras por parque: o estado antes de um instante (sem limite inferior, com `DISTINCT_SCAN` num índice novo) e os eventos de um intervalo (índice `(facilityId, timestamp)`).
+- **Relational:**
+  - schema `analytics` com `occupancy_hourly` (chave `(hour_start, facility_id)`, índice `(zone, hour_start) INCLUDE (somas)`, restrições `CHECK`, sem chaves estrangeiras) e `aggregation_checkpoints`;
+  - *upsert* com `unnest` numa só instrução por bloco;
+  - o relatório numa consulta SQL com `date_trunc(unit, hour_start, 'Europe/Lisbon')` para o início e `date_add(…)` para o fim de cada período;
+  - migração `AddOccupancyHourlySummary`, com `DropSchema` no `Down()`.
+- **Documents:** terceiro índice no log, `ix_facilityId_spotId_timestamp_eventId` (nota no ADR-0007).
+- **Workers:** `OccupancyAggregationService` (a cada minuto, mas só lê quando fecha uma hora) e o comando `aggregate-occupancy --from --to` (só horas fechadas, em fatias de 24 h).
+- **Api:** `GET /api/reports/occupancy`.
+- **Configuração:**
+  - secção `Analytics` nos Workers e `Reports` na API;
+  - `Microsoft.EntityFrameworkCore.Database.Command` em `Information` no `appsettings.Development.json` da API, para o teste manual.
+- **Bench:** `bench/analytics/explain-report.sql`, que produz os planos da revisão de índices sobre um ano sintético e termina com `ROLLBACK`.
+
+### Como se testou que os testes apanham os erros (mutações)
+
+- **Isolamento:** acrescentei `AND EXISTS (SELECT 1 FROM parking_facilities)` à consulta com zona → `The_report_reads_only_the_summary_tables` falhou. Repeti com `parking_spots` na consulta sem zona, já com a captura nova (ver os problemas) → falhou.
+- **Depois das correções da revisão** (um *script* que copia o ficheiro, aplica a mutação, compila, corre o *namespace* `Analytics` e repõe a cópia). Todas as mutações foram apanhadas:
+
+  | Mutação | Testes que falharam |
+  |---|---|
+  | M1: `GREATEST(…)` → `EXCLUDED.position` | `The_store_keeps_the_newest_checkpoint_and_the_newest_row` |
+  | M2: arredondamento → truncatura | `Sub_second_occupations_are_rounded_in_the_stored_row` e 2 casos de `Occupied_milliseconds_are_rounded_to_the_nearest_second` |
+  | M3: `eventId` ascendente no `$sort` | `A_tie_before_the_range_is_broken_by_the_larger_event_id` e `The_state_before_a_range_is_read_with_a_distinct_scan` |
+  | F11: sem o `WHERE aggregated_at` no *upsert* | `The_store_keeps_the_newest_checkpoint_and_the_newest_row` |
+  | F1: sem a paragem antecipada | o teste do *worker* |
+  | F2: o limite de 24 h de volta ao estado inicial | `A_stay_longer_than_a_day_gives_the_same_rows_for_any_range` |
+
+  Em todos os casos, o ficheiro foi copiado para o *scratchpad* antes da mutação e reposto a partir da cópia (lição das Fases 4 e 5).
+
+### Problemas encontrados e tentativas falhadas
+
+1. **Migração vazia.** A primeira `dotnet ef migrations add … --no-build` gerou uma migração vazia: o projeto da API ainda tinha a DLL antiga do Relational (só tinha compilado os Workers). Removi a migração e voltei a gerá-la com compilação.
+2. **Analisador (CA1716).** Um parâmetro chamado `to` numa interface quebra a compilação (palavra reservada noutras linguagens .NET). Mudei para `since`/`until`.
+3. **Teste de isolamento com um segundo *host*.** Na primeira versão, o teste criava uma segunda instância da API (`WithWebHostBuilder`) com um *logger* que captava o SQL. A suite completa falhou num teste da Fase 5 (`OutboxRelayTests.Consistency_window_publish_lag_and_targets_are_exposed_on_metrics`): o *gauge* `smartparking.target` deixou de aparecer no `/metrics` do outro *fixture*. É o mesmo problema registado na Fase 5: o *meter* «SmartParking» de um *host* descartado afeta a exportação dos outros. Troquei o *logger* por uma subscrição dos eventos de diagnóstico do EF Core (`DiagnosticListener`, evento `CommandExecuted`), filtrada pela porta do PostgreSQL deste *fixture*. Com isto, a suite passou duas vezes seguidas (201/201).
+4. **Mutações mal montadas.** Na primeira ronda, a M3 não foi aplicada (o padrão de texto não coincidia com a linha) e a F1 usava `if (false)`, que não compila com os avisos tratados como erros (CS0162). Nesse caso, o «apanhada» que apareceu vinha de binários antigos e não valia nada. Repeti as duas com um padrão correto e com uma condição que compila; os resultados da tabela acima são os da segunda ronda.
+5. **Heredoc outra vez.** Ao corrigir os documentos, usei um heredoc no Git Bash, contra a regra registada nas Fases 3 a 5. O Python abriu uma consola interativa, ficou preso 2 min e teve de ser parado. Antes disso, o *script* tinha aplicado só a primeira parte (o ADR-0007) e falhado na segunda; tornei-o idempotente e corri-o de novo a partir do ficheiro.
+6. **Índices.** A chave inicial `(facility_id, hour_start)` não servia o relatório sem zona: o plano mostrou um *Parallel Seq Scan*. A chave foi reordenada (ver a revisão de índices). Como a migração já estava aplicada na base de dados local, tive de a desfazer (`database update AddOutboxTraceParent`), removê-la, gerá-la de novo e voltar a aplicá-la.
+
+### Verificação (resultados reais)
+
+- **`dotnet build`:** sem avisos nem erros (`TreatWarningsAsErrors`).
+- **`dotnet test`:** antes da revisão de código, 201 testes, 0 falhas, em duas execuções seguidas. **Depois das correções, 211 testes, 0 falhas, em duas execuções seguidas.** Dos 211, 52 são da Fase 6 (*namespace* `Analytics`):
+  - 11 do cálculo;
+  - 17 da validação;
+  - 12 de ponta a ponta;
+  - 1 do *worker*;
+  - 11 das correções da revisão.
+
+  Há ainda 1 teste novo em `MigrationTests`.
+- **Os três testes pedidos no guião:**
+  - lugar ocupado das 10h00 às 10h30 → a hora das 10h dá `occupancyRate` 0,5 (`One_spot_occupied_from_10_00_to_10_30_gives_50_percent_in_the_10_hour`);
+  - a mesma janela agregada duas vezes dá as mesmas linhas e o mesmo número de linhas (`Aggregating_the_same_window_twice_gives_the_same_rows`);
+  - um intervalo que atravessa dias soma corretamente (`A_range_across_days_sums_the_hours_of_each_day`, com uma ocupação das 23h30 às 0h30 repartida pelos dois dias).
+- **Mudança de hora:** 29-03-2026 dá 23 horas e 25-10-2026 dá 25 horas, ambos com taxa 1,0 para um lugar sempre ocupado.
+- **Verificação rápida do Claude Code, na base de dados do `docker compose`** (não substitui o teste manual do Diogo):
+  - `dotnet ef database update` aplicou `AddOccupancyHourlySummary`;
+  - `aggregate-occupancy --from 2026-11-15T00:00Z --to 2026-11-16T10:00Z`: 6 parques, 34 horas, 204 linhas e 3 eventos (os das fases anteriores), em 1 519 ms;
+  - `GET /api/reports/occupancy?from=…&to=…&granularity=day` respondeu 200 com 8 períodos (4 zonas × 2 dias). No log só apareceu `FROM analytics.occupancy_hourly` (EF Core e Npgsql).
+  - Depois das correções, o mesmo comando deu outra vez 204 linhas e 3 eventos (1 627 ms). `--from 11/15/2026` foi recusado («must be a whole hour in ISO 8601»), e `--to 2026-11-17T00:00Z` também («must end at a closed hour»); em ambos os casos o código de saída foi 1.
+
+### Teste manual (passo 4 do guião)
+
+**Por fazer pelo Diogo.** Passos:
+1. arrancar a API em Development;
+2. agregar um intervalo, com o *worker* ou com `aggregate-occupancy`;
+3. chamar o relatório no Swagger;
+4. confirmar no log da categoria `Microsoft.EntityFrameworkCore.Database.Command` que só aparece `analytics.occupancy_hourly`.
+
+Registar aqui o resultado real.
+
+### Revisões independentes (passo 6)
+
+- **Índices** (`docs/revisoes/fase-6-revisao-indices.md`, skill `ef-index-advisor`): a consulta sem zona passou de *Parallel Seq Scan* (28,3 ms, 437 004 linhas descartadas) para *Index Scan* na chave reordenada (2,4 ms), sobre 438 000 linhas sintéticas. A consulta de um ano inteiro com todas as zonas continua a ler a tabela toda (≈ 0,9 s, ordenação em disco por causa do `count(DISTINCT)`). Fica como ponto a medir na Fase 9.
+- **Código** (`docs/revisoes/fase-6-revisao-codigo.md`, subagente separado): 13 achados (1 alto, 3 médios, 1 baixo-médio, 6 baixos, 2 informativos). Segundo a revisão, o cálculo por hora e o SQL estavam corretos; os problemas estavam no *worker*. Das 5 mutações da revisão, 4 sobreviviam aos testes.
+
+### Correção dos achados da revisão (antes dos commits)
+
+- **1 (alto), custo:** o *worker* relia as últimas 2 h a cada minuto, mesmo sem hora nova. Com a D8 seriam cerca de 94 milhões de documentos lidos por hora, a competir com a ingestão.
+  - Correção: a execução termina sem ler nada enquanto não fecha uma hora nova.
+  - O estado inicial passa a ser lido com `$sort` + `$group`/`$first` num índice novo do log (`DISTINCT_SCAN`, cerca de uma entrada por lugar; verificado por `explain`).
+  - **Custo:** um terceiro índice em cada inserção. Fica para medir na Fase 9.
+- **2 (médio), idempotência:** com o limite de 24 h, a mesma hora podia ficar ocupada numa agregação e livre noutra, conforme o início da janela.
+  - Correção: o estado inicial deixou de ter limite inferior, e o `StateLookback` (e o seu `TODO`) desapareceu.
+  - Fica uma limitação nova: um sensor avariado deixa o último estado para sempre (`TODO(Diogo)`: os sensores emitem *heartbeats*?).
+- **3 (médio), memória:** corrigido em parte. O comando divide o intervalo em fatias de 24 h, cada uma com a sua transação; não há *streaming*.
+- **4 (médio), eventos muito atrasados:** documentado. A justificação do `AllowedLateness` foi corrigida (sensor → MongoDB, não a D7). O contador de eventos atrasados fica para a Fase 9.
+- **5, testes:** M1 a M4 passam a ser apanhadas (ver as mutações).
+- **6, fusos:** o fim de cada período vem do PostgreSQL (`date_add`), tal como o início, e o C# deixou de usar o `TimeZoneInfo`.
+- **7, validação:** a granularidade tem um `switch` estrito; as datas passam por `IsoInstant` (`TryParseExact`).
+- **9, comando:** recusa horas que ainda não fecharam.
+- **11, concorrência:** o *upsert* só substitui uma linha por outra agregada depois (`WHERE aggregated_at <= EXCLUDED.aggregated_at`).
+- **12, *gauge*:** a frescura usa o checkpoint guardado, e o *fixture* tem uma só instância de métricas.
+- **13, premissas:** as premissas sem fonte foram retiradas ou marcadas.
+- **8:** documentado no ADR-0010.
+- **10:** fica como `TODO(Diogo)`.
+
+### O que ficou por medir
+
+- O custo da agregação sob a carga da D8 (`smartparking.analytics.duration`) e a frescura (`.staleness`), com 5 execuções e CSV (Fase 9).
+- O tempo do relatório (p95) por granularidade, e se Q1 passa a *index-only* (`Heap Fetches: 0`) depois do `VACUUM`.
+- A comparação com a variante monolítica (secção 6.5): o mesmo relatório calculado diretamente sobre a tabela particionada dos eventos.
+
+### Pontos a levar para a próxima fase
+
+- **`TODO(Diogo)`:**
+  - definição da taxa de ocupação no Cap. 3;
+  - denominador: todos os lugares registados ou só os que têm sensor `Active` (achado 10);
+  - os sensores emitem só mudanças de estado ou também *heartbeats*? Isto decide como tratar um sensor avariado;
+  - `AllowedLateness` (2 min);
+  - limites do intervalo do relatório (31 dias com `hour`, cerca de 3 anos nas outras);
+  - se a D4 se mantém (*data lake* só se o orientador quiser manter a 2.4.5).
+- **Consumidor de `smartparking:domain-events`:** continua sem consumidor e o stream continua a crescer. Decidir em que fase entra (o candidato natural é um relatório de sessões e receitas). Na Fase 9, esvaziar o stream antes de cada cenário.
+- **Fase 9:**
+  - cenário com `aggregate-occupancy` sobre um dia de eventos da D8;
+  - custo do terceiro índice do log na ingestão (`ingest-scale`);
+  - contador de eventos muito atrasados (achado 4), e reagregar o período afetado no cenário `failover`;
+  - `work_mem` do relatório anual; *index-only scan*;
+  - testes do *hosted service* e das métricas `smartparking.analytics.*`, que ficaram sem teste.
+- **Fase 10 (RNF-05):** retenção do log de eventos. O estado inicial do *worker* é o último evento de cada lugar, por mais antigo que seja. Apagar eventos antigos por TTL pode apagar o único evento de um lugar parado há muito tempo. A retenção tem de manter o último evento de cada lugar, ou passar esse estado para uma tabela (`analytics.spot_state`).

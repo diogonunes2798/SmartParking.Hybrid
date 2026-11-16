@@ -58,6 +58,10 @@ O log recebe o UC-01 a partir do *bus* (ADR-0006), que entrega cada mensagem **p
   - **precisão de milissegundos**: o BSON Date não guarda microssegundos (o domínio usa microssegundos, `Guard.Utc`). Para eventos de sensores é suficiente; fica registado para a comparação com a variante monolítica (`timestamptz` guarda microssegundos);
   - **tipos numéricos no `payload` seguem o texto JSON**: `43` fica Int32 e `43.5` fica Double. Um mesmo campo pode ter tipos diferentes entre eventos (o `System.Text.Json` escreve `43.0` como `43`). Quem agregar campos do `payload` (Fases 6 e 7) tem de converter (`$toDouble`) e não pode assumir um tipo único;
   - **durabilidade num *crash* do motor** (revisão da Fase 3, achado 1): o MongoDB do compose é *standalone* com `w:1` e sem `j:true`. O `XACK` pode seguir antes de a escrita estar no *journal* (até cerca de 100 ms). A medir na Fase 9 com `j:true`;
-  - dois índices por escrita: custo a medir no `ingest-scale` (Fase 9) e no `retention` (Fase 10);
+  - dois índices por escrita (três desde a Fase 6, ver a atualização abaixo): custo a medir no `ingest-scale` (Fase 9) e no `retention` (Fase 10);
   - nomes de campos com `$` ou `.` dentro do `payload` dependem das regras do MongoDB 7; se forem recusados, o evento vai para a *dead letter* e não bloqueia os outros.
 - `TODO(Diogo):` referência para o padrão *Event Store* / *Event Sourcing* a citar no Cap. 2.4.4 e no Cap. 4; não foi inventada aqui.
+
+## Atualização (Fase 6, 16-11-2026)
+
+O log tem um terceiro índice, `ix_facilityId_spotId_timestamp_eventId` (`{ facilityId: 1, spotId: 1, timestamp: -1, eventId: -1 }`). Serve para obter o estado de cada lugar antes de uma janela de agregação (UC-04) com um `DISTINCT_SCAN`, sem ler todos os eventos do período (ADR-0010; revisão de código da Fase 6, achados 1 e 2). Cada inserção passa a atualizar três índices. O custo entra nas medições do `ingest-scale` (Fase 9) e do `retention` (Fase 10).
