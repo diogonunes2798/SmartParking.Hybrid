@@ -1392,7 +1392,7 @@ A mesma carga do ensaio híbrido de referência da Fase 7 (`2026-11-16_1514.csv`
 
 ## 16-11-2026 — Fase 9a: infraestrutura de medição (§6, §9 passo 9)
 
-Objetivo: um comando por cenário que gere CSV comparáveis entre a variante híbrida e a monolítica. Os *scripts* só recolhem dados e não interpretam resultados. Ramo `phase-9a-bench-infra`.
+Objetivo: um comando por cenário que gere CSV comparáveis entre a variante híbrida e a monolítica. Os *scripts* só recolhem dados e não interpretam resultados. Ramo `phase-9a-bench-infra`, PR #10.
 
 ### Preparação da máquina (passo 1 do guião)
 
