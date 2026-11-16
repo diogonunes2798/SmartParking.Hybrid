@@ -1,0 +1,17 @@
+// Reference scenario D8 (closed on 2026-11-16, docs/DIARIO.md, Phase 7):
+// 5 000 spots, one event per spot every 5 min on average (5 000 / 300 = 16.67 events/s), peaks of 10× (166.7 events/s).
+// Over a day this is about 1.44 million events.
+// "facilities": 20 is not part of D8; it only splits the spots (250 per facility). TODO(Diogo): confirm or replace
+// with the number of facilities of the case study (Chapter 3).
+// The peak window (minutes 10 to 15 of a 30-minute run) is provisional; Phase 9 fixes the run length per scenario.
+{
+  "name": "d8",
+  "facilities": 20,
+  "spots": 5000,
+  "rate": 16.6667,
+  "peakFactor": 10,
+  "peakWindows": [ { "startSeconds": 600, "durationSeconds": 300 } ],
+  "durationSeconds": 1800,
+  "gen2Ratio": 0,
+  "seed": 42
+}

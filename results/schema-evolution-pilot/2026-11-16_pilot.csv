@@ -1,0 +1,17 @@
+cenario,variante,metrica,valor,unidade,execucao,configuracao
+schema-evolution-pilot,hybrid,e2e_latency_p50_before_ramp,0.15,s (bucket upper bound),1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p95_before_ramp,0.2,s (bucket upper bound),1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p99_before_ramp,0.25,s (bucket upper bound),1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_count_before_ramp,4745,events,1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p50_ramp,0.15,s (bucket upper bound),1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p95_ramp,0.2,s (bucket upper bound),1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p99_ramp,0.2,s (bucket upper bound),1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_count_ramp,986,events,1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p50_after_ramp,0.15,s (bucket upper bound),1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p95_after_ramp,0.25,s (bucket upper bound),1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p99_after_ramp,0.3,s (bucket upper bound),1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_count_after_ramp,6741,events,1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p50_whole_run,0.15,s (bucket upper bound),1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p95_whole_run,0.25,s (bucket upper bound),1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p99_whole_run,0.3,s (bucket upper bound),1,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_count_whole_run,12472,events,1,bench/scenarios/schema-evolution-pilot.json

@@ -1,0 +1,17 @@
+// UC-05 / RNF-04 pilot (Phase 7, step 5); the official measurement is the Phase 9 scenario "schema-evolution".
+// D8 base load without peaks (5 000 spots, 16.67 events/s) for 10 minutes. The share of second-generation sensors
+// (temperature, airQuality, noise in payload) goes from 0 % to 50 % in a 60-second ramp that starts halfway (300 s).
+// Its own name (not "d8"), so that it gets its own facilities and zones and does not mix with other runs.
+{
+  "name": "schema-evolution-pilot",
+  "facilities": 20,
+  "spots": 5000,
+  "rate": 16.6667,
+  "peakFactor": 1,
+  "durationSeconds": 600,
+  "gen2InitialRatio": 0,
+  "gen2Ratio": 0.5,
+  "gen2RampStartSeconds": 300,
+  "gen2RampDurationSeconds": 60,
+  "seed": 42
+}

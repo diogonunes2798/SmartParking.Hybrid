@@ -1,0 +1,12 @@
+// Small manual test of Phase 7 (step 4), before any large load: 2 facilities, 50 spots, 5 events/s, 60 s.
+// Usage: dotnet run --project tools/SensorSimulator -- --scenario bench/scenarios/smoke.json
+{
+  "name": "smoke",
+  "facilities": 2,
+  "spots": 50,
+  "rate": 5,
+  "peakFactor": 1,
+  "durationSeconds": 60,
+  "gen2Ratio": 0,
+  "seed": 42
+}
