@@ -1,0 +1,39 @@
+cenario,variante,metrica,valor,unidade,execucao,configuracao
+schema-evolution-pilot,hybrid,sim_sent,12472,events,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_sent_gen1,8896,events,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_sent_gen2,3576,events,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_accepted_202,12472,events,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_rejected,0,events,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_errors,0,events,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_no_response,0,events,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_requests,4859,requests,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_request_p50,1.297,ms,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_request_p95,1.832,ms,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_request_max,24.826,ms,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_scheduled_p95,103.58,ms,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_dispatch_lag_max,127.538,ms,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_backpressure,0,ms,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_saturated,0,bool,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_cancelled,0,bool,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_elapsed,600.032,s,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_cpu,3.719,s,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,sim_allocated,20.574,MiB,3,name=schema-evolution-pilot;facilities=20;spots=5000;rate=16.6667;peak=1;windows=;duration=600;gen2=0->0.5@300+60;seed=42;batch=500;window=100;concurrency=4;freeAtEnd=True
+schema-evolution-pilot,hybrid,cut_ramp_start,300.0,s after t0,3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,cut_ramp_end,360.0,s after t0,3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,cut_run_end,630.0,s after t0,3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p50_before_ramp,0.15,s (bucket upper bound),3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p95_before_ramp,0.2,s (bucket upper bound),3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p99_before_ramp,0.2,s (bucket upper bound),3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_count_before_ramp,9999,events,3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p50_ramp,0.15,s (bucket upper bound),3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p95_ramp,0.2,s (bucket upper bound),3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p99_ramp,0.2,s (bucket upper bound),3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_count_ramp,1902,events,3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p50_after_ramp,0.15,s (bucket upper bound),3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p95_after_ramp,0.3,s (bucket upper bound),3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p99_after_ramp,0.3,s (bucket upper bound),3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_count_after_ramp,8808,events,3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p50_whole_run,0.15,s (bucket upper bound),3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p95_whole_run,0.25,s (bucket upper bound),3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_p99_whole_run,0.3,s (bucket upper bound),3,bench/scenarios/schema-evolution-pilot.json
+schema-evolution-pilot,hybrid,e2e_latency_count_whole_run,20709,events,3,bench/scenarios/schema-evolution-pilot.json
