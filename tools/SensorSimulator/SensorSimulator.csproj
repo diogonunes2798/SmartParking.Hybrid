@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Load generator for UC-01 and UC-05 (spec §8). It talks to the API over HTTP only and references no project of
+    src/, so that it exercises the public contract and cannot depend on internal types (ADR-0011).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>SmartParking.SensorSimulator</RootNamespace>
+    <AssemblyName>SensorSimulator</AssemblyName>
+    <!-- Server GC off: the simulator shares the machine with the API in local runs, and a small heap keeps its own
+         CPU and memory footprint low (see the Phase 7 allocation review). -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="SmartParking.SensorSimulator.Tests" />
+    <InternalsVisibleTo Include="SmartParking.Api.IntegrationTests" />
+  </ItemGroup>
+</Project>
