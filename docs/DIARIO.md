@@ -989,13 +989,36 @@ O que encontrei no código antes de começar:
 
 ### Teste manual (passo 4 do guião)
 
-**Por fazer pelo Diogo.** Passos:
-1. arrancar a API em Development;
-2. agregar um intervalo, com o *worker* ou com `aggregate-occupancy`;
-3. chamar o relatório no Swagger;
-4. confirmar no log da categoria `Microsoft.EntityFrameworkCore.Database.Command` que só aparece `analytics.occupancy_hourly`.
+**Feito pelo Claude Code a pedido do Diogo** (16-11-2026, cerca das 13h55 UTC, depois dos commits do código). O relatório foi chamado por HTTP com um *script* (`curl`), não pela interface do Swagger, mas com o mesmo *endpoint*. Base de dados do `docker compose`, com os dados das fases anteriores.
 
-Registar aqui o resultado real.
+1. **Configuração:** `Microsoft.EntityFrameworkCore.Database.Command` em `Information` no `appsettings.Development.json` da API (já versionado nesta fase).
+2. **Agregação:** `aggregate-occupancy --from 2026-11-15T00:00:00Z --to 2026-11-16T13:00:00Z` → 6 parques, 37 horas, 222 linhas, 3 eventos, em 1 449 ms.
+3. **API em Development** (`--launch-profile http`), com o log para um ficheiro. Contei as linhas do log antes das chamadas e analisei só as que vieram depois.
+4. **Chamadas**, todas com resposta **200**:
+   - zona `Baixa`: `hour` (16-11, 0h–13h), `day` (15 e 16-11), `week` (semanas de 9 e 16-11) e `month` (novembro);
+   - todas as zonas: `day`.
+
+   Uma sexta chamada, com `from=2026-11-15T00:30Z`, deu **400** com «from: must be a whole hour» e não executou SQL.
+5. **Resultado no log:**
+   - **5 comandos** `Microsoft.EntityFrameworkCore.Database.Command[20101]`, um por chamada válida, e outros 5 de `Npgsql.Command[2001]`;
+   - as únicas cláusulas `FROM`/`JOIN` foram **`FROM analytics.occupancy_hourly`** (10 ocorrências: EF Core e Npgsql);
+   - nenhuma linha menciona `parking_*`, `outbox`, `audit`, `sensors`, `tariffs`, `users`, `vehicles`, `payments` nem o MongoDB.
+
+   Exemplo (variante com zona):
+   ```
+   SELECT zone, period_start, date_add(period_start, @p0::interval, @p1) AS period_end, …
+   FROM (
+       SELECT zone, date_trunc(@p2, hour_start, @p3) AS period_start, count(DISTINCT hour_start)::int AS hours, …
+       FROM analytics.occupancy_hourly
+       WHERE zone = @p4 AND hour_start >= @p5 AND hour_start < @p6
+       GROUP BY zone, 2
+   ) AS periods
+   ORDER BY period_start, zone
+   ```
+6. **Coerência das respostas:**
+   - a semana de 9-11 tem `hours` 24 e `expectedHours` 168, porque só um dia estava agregado; o mês de novembro tem `hours` 37 e `expectedHours` 720. O sinal de período incompleto funciona;
+   - o dia 15-11 da zona Baixa dá 258,08 min ocupados de 2 880 (taxa 0,0896), o mesmo valor da verificação feita antes da revisão;
+   - os tempos (29 ms e 40 ms no primeiro comando) são amostras únicas, locais e sem carga, sem valor estatístico.
 
 ### Revisões independentes (passo 6)
 
