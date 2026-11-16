@@ -31,7 +31,7 @@ A especificação completa está em `docs/ESPECIFICACAO.md`. Lê-a antes de qual
 
 ```bash
 docker compose up -d                 # PostgreSQL, MongoDB, Redis (+ broker, se ativo)
-docker compose --profile observability up -d   # + Prometheus em http://localhost:9090
+docker compose --profile observability up -d   # + Prometheus (http://localhost:9090) e Jaeger (http://localhost:16686; traces com OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317)
 dotnet tool restore                  # dotnet-ef fixado no manifesto local (dotnet-tools.json)
 dotnet ef database update --project src/SmartParking.Infrastructure.Relational --startup-project src/SmartParking.Api
 dotnet ef migrations add <Nome> --project src/SmartParking.Infrastructure.Relational --startup-project src/SmartParking.Api --output-dir Migrations
