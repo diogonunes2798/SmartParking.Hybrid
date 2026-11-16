@@ -1,0 +1,2 @@
+# Shell scripts keep LF on every checkout: with core.autocrlf=true, a CRLF bench/run.sh fails in bash ($'\r').
+*.sh text eol=lf
