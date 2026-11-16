@@ -4,9 +4,9 @@ using System.Text.Json.Serialization;
 namespace SmartParking.Application.Availability;
 
 /// <summary>
-/// Wire format of a configuration event (RF-06) on the bus: one outbox row (ADR-0004) as the relay of Phase 5 will
-/// publish it. <see cref="Payload"/> is the outbox <c>payload</c> column (the domain event serialised in camelCase,
-/// enums by name). The read model consumes it in Phase 4; until the relay exists, tests publish it directly.
+/// Wire format of an outbox event on the bus: one outbox row (ADR-0004) as the relay publishes it (Phase 5, ADR-0009).
+/// Configuration events (RF-06) and session/payment events (topic <c>smartparking:domain-events</c>) share it. <see cref="Payload"/> is the outbox <c>payload</c> column (the domain event serialised in camelCase,
+/// enums by name). The read model consumes the configuration topic (Phase 4).
 /// </summary>
 public sealed record ConfigurationEventMessage(
     Guid Id, string Type, Guid AggregateId, DateTimeOffset OccurredAt, JsonElement Payload)

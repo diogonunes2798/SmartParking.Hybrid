@@ -4,6 +4,7 @@
 #
 #   docker compose up -d                          # PostgreSQL, MongoDB, Redis
 #   docker compose --profile observability up -d  # + Prometheus (http://localhost:9090)
+#                                                 #   + Jaeger (traces, http://localhost:16686; OTLP on 4317/4318)
 #
 # Messaging (D2, default "PostgreSQL outbox + Redis Streams") needs no extra broker container.
 # Credentials are development-only defaults; override them in a local .env (see .env.example).
@@ -72,6 +73,16 @@ services:
       - prometheus-data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # Traces (Phase 5, ADR-0009): the API and the Workers export to it only when OTEL_EXPORTER_OTLP_ENDPOINT is set
+  # (e.g. http://localhost:4317). In-memory storage: traces are for inspection, the measurements are the metrics.
+  jaeger:
+    image: jaegertracing/jaeger:2.11.0@sha256:b585df1b6299bbbd16bf7c679da30389349736e4b6bc8f4f500142a75bf26ca8
+    profiles: ["observability"]
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
 
 volumes:
   postgres-data:
