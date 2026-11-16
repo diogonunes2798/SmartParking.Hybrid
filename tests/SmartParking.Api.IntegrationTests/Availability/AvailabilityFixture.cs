@@ -10,6 +10,7 @@ using SmartParking.Application.Abstractions;
 using SmartParking.Application.Availability;
 using SmartParking.Application.Configuration;
 using SmartParking.Application.Ingestion;
+using SmartParking.Application.Outbox;
 using SmartParking.Domain.Facilities;
 using SmartParking.Infrastructure.Cache;
 using SmartParking.Infrastructure.Cache.Availability;
@@ -41,6 +42,9 @@ public sealed class AvailabilityFixture : IAsyncLifetime
     public IConnectionMultiplexer Redis { get; private set; } = null!;
 
     public IAvailabilityReadModel ReadModel => Services.GetRequiredService<IAvailabilityReadModel>();
+
+    /// <summary>One outbox metrics instance for the relays the tests build (Phase 5).</summary>
+    public OutboxMetrics OutboxMetrics => field ??= new OutboxMetrics(Services.GetRequiredService<IMeterFactory>());
 
     public async ValueTask InitializeAsync()
     {
@@ -90,6 +94,10 @@ public sealed class AvailabilityFixture : IAsyncLifetime
             [$"ConnectionStrings:{CacheRegistration.ConnectionStringName}"] = _api.Redis.GetConnectionString(),
         });
 
+        // The API's meter factory, not one per host: the API's OpenTelemetry provider listens to every «SmartParking»
+        // meter in the process, and once a host's own meter is disposed, OpenTelemetry stops exporting instruments of
+        // the same name created later (found in Phase 5: the /metrics assertions depended on the test order).
+        builder.Services.AddSingleton(Services.GetRequiredService<IMeterFactory>());
         builder.Services.AddMetrics();
         builder.Services.AddDocumentPersistence(builder.Configuration, []);
         builder.Services.AddCacheStore(builder.Configuration, []);
