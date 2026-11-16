@@ -50,8 +50,8 @@ O plano de implementação tem dez fases (secção 9 da especificação). Estado
 | 5 | *Relay* da outbox e medição da janela de consistência | Concluída |
 | 6 | Analítica com tabelas de resumo (UC-04) | Concluída |
 | 7 | Simulador de sensores e evolução de esquema (UC-05), com ensaio piloto | Concluída |
-| 8 | Variante monolítica (`baseline/`) | Por fazer |
-| 9 | *Benchmarks* (cenários da secção 6, `bench/run.sh`, CSV) | Por fazer |
+| 8 | Variante monolítica (`Persistence:Mode=Monolithic`, ADR-0012) | Concluída |
+| 9 | *Benchmarks* (cenários da secção 6, `bench/run.sh`, CSV) | Em curso: 9a (infraestrutura de medição, [bench/README.md](bench/README.md)) feita; cenários por fazer |
 | 10 | Retenção e sustentabilidade (RNF-05) | Por fazer |
 
 O estado de cada requisito, com os artefactos e os testes que o comprovam, está em [docs/RASTREABILIDADE.md](docs/RASTREABILIDADE.md). O registo do que foi feito em cada fase, com os problemas e as decisões, está em [docs/DIARIO.md](docs/DIARIO.md).
@@ -60,7 +60,8 @@ O estado de cada requisito, com os artefactos e os testes que o comprovam, está
 
 - [.NET SDK 10](https://dotnet.microsoft.com/) (versão fixada em [global.json](global.json))
 - Docker com `docker compose` (os testes de integração também precisam do Docker, por causa do Testcontainers)
-- Python 3, apenas para o script do ensaio piloto do UC-05 (`bench/schema-evolution/pilot_latency.py`)
+- Python 3, apenas para os *scripts* de medição (`bench/lib/`, `bench/schema-evolution/`)
+- Git Bash no Windows, para o `bench/run.sh`; o k6 corre num contentor e não precisa de instalação
 
 ## Início rápido
 
