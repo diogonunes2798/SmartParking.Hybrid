@@ -837,6 +837,7 @@ Todas as mutações foram repostas a partir de cópias e não com `git checkout`
 
   São amostras isoladas e locais, sem valor estatístico. A D7 e a janela medem-se na Fase 9.
 - **Teste manual do Diogo (passo 4 do guião):** por fazer. Fechar uma sessão no Swagger, repetir a consulta à outbox da Fase 2b (`processed_at` preenchido em poucos segundos) e correr `curl http://localhost:5090/metrics | grep -i -E "consistency|e2e|latency"`. A porta é a dos **Workers** (5090), onde estão o *relay* e os projetores. O `/metrics` da API (5080) não tem a janela nem a E2E: só os alvos, a latência HTTP e as métricas de ingestão.
+  - **Primeira tentativa falhou (16-11-2026).** O comando do guião é para bash e o terminal é o Windows PowerShell 5.1: não existe `grep`, e `curl` é um alias de `Invoke-WebRequest`. Além disso, nem a API nem os Workers estavam a correr, porque foram parados no fim do meu ensaio. **Pré-condição:** os dois processos arrancados (`dotnet run --project src/SmartParking.Api` e `dotnet run --project src/SmartParking.Workers`, em dois terminais). Equivalente em PowerShell: `(Invoke-WebRequest -UseBasicParsing http://localhost:5090/metrics).Content -split "`n" | Select-String 'consistency|e2e|latency'`, ou `curl.exe -s http://localhost:5090/metrics | findstr /I "consistency e2e latency"`.
 
 ### Revisões independentes (passo 6)
 
