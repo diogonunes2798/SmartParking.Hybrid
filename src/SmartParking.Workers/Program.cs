@@ -1,3 +1,4 @@
+using SmartParking.Application.Analytics;
 using SmartParking.Application.Availability;
 using SmartParking.Application.Ingestion;
 using SmartParking.Application.Outbox;
@@ -6,6 +7,7 @@ using SmartParking.Infrastructure.Documents;
 using SmartParking.Infrastructure.Messaging;
 using SmartParking.Infrastructure.Relational;
 using SmartParking.ServiceDefaults;
+using SmartParking.Workers.Analytics;
 using SmartParking.Workers.Outbox;
 using SmartParking.Workers.ReadModel;
 
@@ -13,10 +15,17 @@ using SmartParking.Workers.ReadModel;
 // PostgreSQL and MongoDB and exits (ADR-0008; benchmarks start from a known state). It may run while the Workers run:
 // the rebuild lock holds their projectors back meanwhile (review of Phase 4, finding 1).
 const string RebuildCommand = "rebuild-read-model";
-var rebuildOnly = args.Length > 0 && args[0] == RebuildCommand;
+
+// `dotnet run --project src/SmartParking.Workers -- aggregate-occupancy --from 2026-11-16T00:00Z --to 2026-11-17T00:00Z`
+// aggregates that range of whole UTC hours into the summary table and exits (UC-04, ADR-0010): backfills, and the
+// benchmarks of Phase 9. Safe while the Workers run (upsert); it does not move the worker's checkpoint.
+const string AggregateCommand = "aggregate-occupancy";
+var command = args.Length > 0 && args[0] is RebuildCommand or AggregateCommand ? args[0] : null;
+var rebuildOnly = command is not null;
 
 // The workers host is a (minimal) web host so that it exposes /health and /metrics like the API:
 // readiness and metrics of the consumers are needed for RNF-02/RNF-03 measurements.
+// The arguments after a command reach the configuration («--from X» is the key «from»).
 var builder = WebApplication.CreateBuilder(rebuildOnly ? args[1..] : args);
 
 builder.AddServiceDefaults("smartparking-workers");
@@ -32,6 +41,14 @@ builder.Services
 builder.Services.AddSingleton<ReadModelMetrics>();
 builder.Services.AddSingleton<ReadModelGate>();
 builder.Services.AddScoped<ReadModelRebuilder>();
+
+// Occupancy aggregation (UC-04, RF-05, Phase 6, D4 default, ADR-0010): MongoDB log → analytics.occupancy_hourly.
+// Settings: Analytics (Enabled, Interval, AllowedLateness, ReaggregateHours, MaxHoursPerRun, ...).
+var analytics = builder.Configuration.GetSection(AnalyticsOptions.SectionName).Get<AnalyticsOptions>() ?? new();
+analytics.Validate();
+builder.Services.AddSingleton(analytics);
+builder.Services.AddSingleton<AnalyticsMetrics>();
+builder.Services.AddScoped<OccupancyAggregator>();
 
 if (!rebuildOnly)
 {
@@ -83,6 +100,11 @@ if (!rebuildOnly)
     {
         builder.Services.AddHostedService<OutboxRelayService>();
     }
+
+    if (analytics.Enabled)
+    {
+        builder.Services.AddHostedService<OccupancyAggregationService>();
+    }
 }
 
 var app = builder.Build();
@@ -101,12 +123,24 @@ if (rebuildOnly)
     {
         try
         {
-            var report = await scope.ServiceProvider.GetRequiredService<ReadModelRebuilder>().RebuildAsync(cancel.Token);
-            Console.WriteLine(
-                $"Read model rebuilt: {report.Facilities} facilities, {report.Spots} spots, " +
-                $"{report.Events} latest events ({report.EventsApplied} applied) in {report.Duration.TotalMilliseconds:F0} ms.");
+            if (command == AggregateCommand)
+            {
+                var from = ParseHour(builder.Configuration["from"], "--from");
+                var to = ParseHour(builder.Configuration["to"], "--to");
+                var report = await scope.ServiceProvider.GetRequiredService<OccupancyAggregator>().AggregateAsync(from, to, cancel.Token);
+                Console.WriteLine(
+                    $"Occupancy aggregated from {from:O} to {to:O}: {report.Facilities} facilities, {report.Hours} hours, " +
+                    $"{report.Rows} rows, {report.Events} events in {report.Duration.TotalMilliseconds:F0} ms.");
+            }
+            else
+            {
+                var report = await scope.ServiceProvider.GetRequiredService<ReadModelRebuilder>().RebuildAsync(cancel.Token);
+                Console.WriteLine(
+                    $"Read model rebuilt: {report.Facilities} facilities, {report.Spots} spots, " +
+                    $"{report.Events} latest events ({report.EventsApplied} applied) in {report.Duration.TotalMilliseconds:F0} ms.");
+            }
         }
-        catch (RebuildInProgressException ex)
+        catch (Exception ex) when (ex is RebuildInProgressException or ArgumentException)
         {
             Console.Error.WriteLine(ex.Message);
             Environment.ExitCode = 1;
@@ -119,3 +153,9 @@ if (rebuildOnly)
 app.MapDefaultEndpoints();
 
 await app.RunAsync();
+
+static DateTimeOffset ParseHour(string? value, string name) =>
+    IsoInstant.TryParse(value, out var instant)
+    && OccupancyIntervalCalculator.IsWholeHour(instant)
+        ? instant
+        : throw new ArgumentException($"{name} must be a whole hour in ISO 8601 (e.g. 2026-11-16T00:00:00Z), got '{value}'.");

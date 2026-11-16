@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using SmartParking.Application.Analytics;
 using SmartParking.Application.Configuration;
 using SmartParking.Application.Ingestion;
 using SmartParking.Application.Sessions;
@@ -32,6 +33,13 @@ internal static class ApplicationRegistration
         services.AddScoped<SessionCommands>();
         services.AddScoped<UserCommands>();
         services.AddSingleton<ITariffPricing, ProvisionalTariffPricing>();
+
+        // UC-04 (analytical report, RF-05), query side only: IOccupancyReportQueries (Relational) reads analytics.* alone.
+        // The time zone is resolved now, so that an unknown name fails at startup (ADR-0010).
+        var reports = configuration.GetSection(ReportSettings.SectionName).Get<ReportSettings>() ?? new ReportSettings();
+        _ = reports.Resolve();
+        services.AddSingleton(reports);
+        services.AddScoped<OccupancyReportService>();
         return services;
     }
 }
