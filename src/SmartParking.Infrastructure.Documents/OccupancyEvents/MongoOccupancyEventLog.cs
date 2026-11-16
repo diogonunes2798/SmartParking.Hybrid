@@ -1,6 +1,7 @@
 using MongoDB.Bson;
 using MongoDB.Driver;
 using SmartParking.Application.Abstractions;
+using SmartParking.Application.Analytics;
 using SmartParking.Domain.Occupancy;
 
 namespace SmartParking.Infrastructure.Documents.OccupancyEvents;
@@ -25,6 +26,7 @@ public sealed class MongoOccupancyEventLog(IMongoDatabase database, TimeProvider
     public const string CollectionName = "occupancy_events";
     public const string EventIdIndexName = "ux_eventId";
     public const string FacilityTimestampIndexName = "ix_facilityId_timestamp";
+    public const string FacilitySpotTimestampIndexName = "ix_facilityId_spotId_timestamp_eventId";
 
     private const int DuplicateKeyCode = 11000;
 
@@ -130,7 +132,87 @@ public sealed class MongoOccupancyEventLog(IMongoDatabase database, TimeProvider
         }
     }
 
-    /// <summary>Creates the two indexes of the log if they do not exist (idempotent on the server).</summary>
+    /// <summary>
+    /// State of each spot of one facility just before <paramref name="before"/>, with no lower bound (UC-04 aggregation,
+    /// ADR-0010, review of Phase 6, findings 1 and 2): the last event of each spot, however old. <c>$sort</c> on the
+    /// <c>(facilityId, spotId, timestamp desc, eventId desc)</c> index followed by <c>$group</c> with <c>$first</c> is
+    /// answered with a <c>DISTINCT_SCAN</c>: about one index entry per spot instead of every event of the period.
+    /// </summary>
+    public async Task<IReadOnlyList<LatestSpotEvent>> GetLatestPerSpotAsync(
+        Guid facilityId, DateTimeOffset before, CancellationToken cancellationToken)
+    {
+        await EnsureIndexesAsync(cancellationToken).ConfigureAwait(false);
+
+        var result = new List<LatestSpotEvent>();
+        using var cursor = await collection
+            .AggregateAsync<BsonDocument>(LatestPerSpotPipeline(facilityId, before), cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
+        {
+            foreach (var document in cursor.Current)
+            {
+                result.Add(new LatestSpotEvent(
+                    document["eventId"].AsBsonBinaryData.ToGuid(GuidRepresentation.Standard),
+                    document["_id"].AsBsonBinaryData.ToGuid(GuidRepresentation.Standard),
+                    Type(document["type"]),
+                    Timestamp(document["timestamp"])));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>The pipeline of <see cref="GetLatestPerSpotAsync(Guid, DateTimeOffset, CancellationToken)"/> (public for the explain test).</summary>
+    public static BsonDocument[] LatestPerSpotPipeline(Guid facilityId, DateTimeOffset before) =>
+    [
+        new("$match", new BsonDocument
+        {
+            { "facilityId", Uuid(facilityId) },
+            { "timestamp", new BsonDocument("$lt", new BsonDateTime(before.UtcDateTime)) },
+        }),
+        new("$sort", new BsonDocument { { "facilityId", 1 }, { "spotId", 1 }, { "timestamp", -1 }, { "eventId", -1 } }),
+        new("$group", new BsonDocument
+        {
+            { "_id", "$spotId" },
+            { "eventId", new BsonDocument("$first", "$eventId") },
+            { "type", new BsonDocument("$first", "$type") },
+            { "timestamp", new BsonDocument("$first", "$timestamp") },
+        }),
+    ];
+
+    /// <summary>
+    /// Events of one facility in [<paramref name="since"/>, <paramref name="until"/>) (UC-04 aggregation, ADR-0010). A range
+    /// scan of the <c>(facilityId, timestamp)</c> index; only the four fields the aggregation needs are returned.
+    /// </summary>
+    public async Task<IReadOnlyList<SpotOccupancyEvent>> GetEventsAsync(
+        Guid facilityId, DateTimeOffset since, DateTimeOffset until, CancellationToken cancellationToken)
+    {
+        var projection = new BsonDocument { { "_id", 0 }, { "eventId", 1 }, { "spotId", 1 }, { "type", 1 }, { "timestamp", 1 } };
+        var documents = await collection.Find(FacilityRange(facilityId, since, until))
+            .Project(projection)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return documents
+            .Select(d => new SpotOccupancyEvent(
+                d["eventId"].AsBsonBinaryData.ToGuid(GuidRepresentation.Standard),
+                d["spotId"].AsBsonBinaryData.ToGuid(GuidRepresentation.Standard),
+                Type(d["type"]),
+                Timestamp(d["timestamp"])))
+            .ToList();
+    }
+
+    private static BsonDocument FacilityRange(Guid facilityId, DateTimeOffset since, DateTimeOffset until) => new()
+    {
+        { "facilityId", Uuid(facilityId) },
+        { "timestamp", new BsonDocument { { "$gte", new BsonDateTime(since.UtcDateTime) }, { "$lt", new BsonDateTime(until.UtcDateTime) } } },
+    };
+
+    private static OccupancyEventType Type(BsonValue value) =>
+        value.AsString == "OCCUPIED" ? OccupancyEventType.Occupied : OccupancyEventType.Freed;
+
+    private static DateTimeOffset Timestamp(BsonValue value) => new(value.ToUniversalTime(), TimeSpan.Zero);
+
+    /// <summary>Creates the three indexes of the log if they do not exist (idempotent on the server).</summary>
     public async Task EnsureIndexesAsync(CancellationToken cancellationToken)
     {
         if (indexesReady)
@@ -153,6 +235,12 @@ public sealed class MongoOccupancyEventLog(IMongoDatabase database, TimeProvider
                 new(
                     keys.Ascending("facilityId").Ascending("timestamp"),
                     new CreateIndexOptions { Name = FacilityTimestampIndexName }),
+
+                // State of each spot before an aggregation range (UC-04, ADR-0010): one entry per spot (DISTINCT_SCAN).
+                // A third index costs on every insert; measured in Phase 9 (RNF-01, RNF-05).
+                new(
+                    keys.Ascending("facilityId").Ascending("spotId").Descending("timestamp").Descending("eventId"),
+                    new CreateIndexOptions { Name = FacilitySpotTimestampIndexName }),
             ];
             await collection.Indexes.CreateManyAsync(models, cancellationToken).ConfigureAwait(false);
             indexesReady = true;
