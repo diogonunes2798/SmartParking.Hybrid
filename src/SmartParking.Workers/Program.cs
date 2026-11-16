@@ -1,10 +1,12 @@
 using SmartParking.Application.Availability;
 using SmartParking.Application.Ingestion;
+using SmartParking.Application.Outbox;
 using SmartParking.Infrastructure.Cache;
 using SmartParking.Infrastructure.Documents;
 using SmartParking.Infrastructure.Messaging;
 using SmartParking.Infrastructure.Relational;
 using SmartParking.ServiceDefaults;
+using SmartParking.Workers.Outbox;
 using SmartParking.Workers.ReadModel;
 
 // `dotnet run --project src/SmartParking.Workers -- rebuild-read-model` rebuilds the availability read model from
@@ -59,7 +61,7 @@ if (!rebuildOnly)
             options.Group = AvailabilityConsumers.Occupancy;
         });
 
-    // RF-06 → read model: configuration events relayed from the outbox (relay in Phase 5).
+    // RF-06 → read model: configuration events relayed from the outbox (relay below, Phase 5).
     // Settings: Messaging:Consumers:availability-configuration.
     builder.Services.AddStreamConsumer<ConfigurationProjector>(
         builder.Configuration,
@@ -69,6 +71,18 @@ if (!rebuildOnly)
             options.Stream = ConfigurationEventMessage.Topic;
             options.Group = AvailabilityConsumers.Configuration; // own name: own metrics (review of Phase 4, finding 6)
         });
+
+    // Outbox relay (UC-02, RF-06, Phase 5, ADR-0009): PostgreSQL outbox → bus (D2), FOR UPDATE SKIP LOCKED so that
+    // several Workers instances can run it. Settings: Outbox (Enabled, BatchSize, PollInterval, ...).
+    var outbox = builder.Configuration.GetSection(OutboxRelayOptions.SectionName).Get<OutboxRelayOptions>() ?? new();
+    outbox.Validate();
+    builder.Services.Configure<OutboxRelayOptions>(builder.Configuration.GetSection(OutboxRelayOptions.SectionName));
+    builder.Services.AddSingleton<OutboxMetrics>();
+    builder.Services.AddScoped<OutboxRelay>();
+    if (outbox.Enabled)
+    {
+        builder.Services.AddHostedService<OutboxRelayService>();
+    }
 }
 
 var app = builder.Build();

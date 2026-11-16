@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using SmartParking.Application.Abstractions;
+using SmartParking.Application.Diagnostics;
 using SmartParking.Domain.Common;
 using SmartParking.Domain.Facilities;
 
@@ -11,10 +13,16 @@ namespace SmartParking.Application.Availability;
 /// last change applied, so a redelivered or late event is ignored (idempotent, ADR-0008). Event types the read
 /// model does not need (e.g. sessions, if the relay ever shares the stream) are acknowledged and ignored.
 /// </summary>
+/// <remarks>
+/// Phase 5 (ADR-0009): for every event applied now, records the consistency window (outbox <c>occurred_at</c> → read
+/// model updated, Cap. 4.5) and continues the trace of the request that raised it (one span per event, child of the
+/// relay's span carried in the message).
+/// </remarks>
 public sealed class ConfigurationProjector(
     IAvailabilityReadModel readModel,
     ReadModelGate gate,
-    ReadModelMetrics metrics) : IMessageBatchHandler
+    ReadModelMetrics metrics,
+    TimeProvider time) : IMessageBatchHandler
 {
     public async Task<BatchOutcome> HandleAsync(IReadOnlyList<DeliveredMessage> messages, CancellationToken cancellationToken)
     {
@@ -32,6 +40,12 @@ public sealed class ConfigurationProjector(
                 poison.Add(delivered.Id);
                 continue;
             }
+
+            ActivityContext.TryParse(delivered.Message.TraceParent, null, out var parent);
+            using var span = SmartParkingTelemetry.ActivitySource.StartActivity(
+                "apply configuration event", ActivityKind.Consumer, parent);
+            span?.SetTag("messaging.message.id", message.Id.ToString());
+            span?.SetTag("smartparking.outbox.type", message.Type);
 
             var changedAt = message.OccurredAt;
             ConfigurationOutcome? outcome = message.Type switch
@@ -60,9 +74,17 @@ public sealed class ConfigurationProjector(
                 // A known type whose payload does not deserialise or breaks a domain rule: never processable. Checked
                 // here because a Lua script that fails half way keeps its earlier writes (review of Phase 4, finding 7).
                 poison.Add(delivered.Id);
+                span?.SetStatus(ActivityStatusCode.Error, "poison");
                 continue;
             }
 
+            if (outcome == ConfigurationOutcome.Applied)
+            {
+                // Only when the read model changed now: a redelivery (stale) would add the time until the redelivery.
+                metrics.ConsistencyWindow(message.Type, time.GetUtcNow() - message.OccurredAt);
+            }
+
+            span?.SetTag("smartparking.outcome", outcome.Value.ToString());
             metrics.Configuration(message.Type, outcome.Value switch
             {
                 ConfigurationOutcome.Applied => "applied",

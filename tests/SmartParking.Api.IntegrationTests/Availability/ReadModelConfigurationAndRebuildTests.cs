@@ -174,7 +174,7 @@ public sealed class ReadModelConfigurationAndRebuildTests(AvailabilityFixture fi
             foreach (var row in await fixture.OutboxAsync(id))
             {
                 var m = new ConfigurationEventMessage(row.Id, row.Type, row.AggregateId, row.OccurredAt, System.Text.Json.JsonDocument.Parse(row.Payload).RootElement);
-                await new ConfigurationProjector(fixture.ReadModel, ReadModelGate.Opened(), Metrics())
+                await new ConfigurationProjector(fixture.ReadModel, ReadModelGate.Opened(), Metrics(), TimeProvider.System)
                     .HandleAsync([new DeliveredMessage("0-1", new BusMessage(row.Id.ToString(), m.ToJson()))], ct);
             }
         }

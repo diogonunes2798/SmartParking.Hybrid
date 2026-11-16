@@ -159,6 +159,9 @@ public sealed class RunningConsumer(IHost host) : IAsyncDisposable
 {
     private bool stopped;
 
+    /// <summary>Services of the consumer host (e.g. its own IMeterFactory, to listen to its metrics only).</summary>
+    public IServiceProvider Services => host.Services;
+
     public async Task StopAsync()
     {
         if (!stopped)

@@ -217,7 +217,7 @@ public sealed class ReadModelReviewFixesTests(AvailabilityFixture fixture)
             ConfigurationEventMessage.SerializerOptions);
         var message = new ConfigurationEventMessage(Guid.NewGuid(), nameof(FacilityChanged), facility, DateTimeOffset.UtcNow, payload);
         var projector = new ConfigurationProjector(
-            fixture.ReadModel, ReadModelGate.Opened(), new ReadModelMetrics(fixture.Services.GetRequiredService<IMeterFactory>()));
+            fixture.ReadModel, ReadModelGate.Opened(), new ReadModelMetrics(fixture.Services.GetRequiredService<IMeterFactory>()), TimeProvider.System);
 
         var outcome = await projector.HandleAsync([new DeliveredMessage("1-1", new BusMessage("k", message.ToJson()))], Ct);
 
@@ -254,7 +254,7 @@ public sealed class ReadModelReviewFixesTests(AvailabilityFixture fixture)
 
         foreach (var (name, bucket) in new[]
         {
-            ("smartparking_read_model_lag_seconds_bucket", "le=\"0.3\""),
+            ("smartparking_ingestion_e2e_latency_seconds_bucket", "le=\"0.3\""),
             ("smartparking_read_model_bus_lag_seconds_bucket", "le=\"0.2\""),
             ("smartparking_occupancy_log_lag_seconds_bucket", "le=\"0.1\""),
         })

@@ -737,3 +737,164 @@ O Diogo aprovou o conjunto recomendado: os 5 achados altos e médios e três bai
   - duração da reconstrução com 5 000 lugares e 10⁶ eventos (custo do *collection scan* do `$group`);
   - variante «SET de livres» se os contadores mostrarem problemas.
 - **`TODO(Diogo)`:** lugar sem leitura = livre? Raio máximo de 50 km.
+
+## 16-11-2026 — Fase 5: sincronização (*relay* da outbox) e medição
+
+Âmbito:
+- *relay* da outbox nos Workers, com `FOR UPDATE SKIP LOCKED` para poder correr em várias instâncias;
+- consumidores idempotentes no *read model*;
+- janela de consistência (UC-02, Cap. 4.5) e latência ponta a ponta do UC-01 (D7) como histogramas OpenTelemetry;
+- *trace* propagado desde o pedido HTTP até ao consumidor;
+- alvo D7 em configuração.
+
+### Plano e decisões (antes do código)
+
+- **Plano aprovado pelo Diogo com as quatro opções por omissão:**
+  1. a janela ponta a ponta mede-se nos eventos de configuração; para os eventos de sessão e pagamento mede-se só até à publicação (`publish_lag`), porque o consumidor deles chega na Fase 6;
+  2. o histograma E2E muda de nome para `smartparking.ingestion.e2e_latency`;
+  3. exportador OTLP opcional e Jaeger no compose;
+  4. `UPDATE processed_at` (sem `DELETE`), com a retenção na Fase 10.
+- **Relógios** (pedido no passo 2 do guião):
+  - a janela de consistência começa no `occurred_at`, lido pelo `TimeProvider.System` da API, e acaba no `TimeProvider.System` dos Workers;
+  - a latência E2E começa no `timestamp` do sensor e acaba no relógio dos Workers;
+  - em local, os processos correm todos no mesmo anfitrião e leem o mesmo relógio, por isso o desvio é zero;
+  - está escrito no ADR-0009, ponto 5, com a condição para a Fase 9 e o que muda numa implantação distribuída.
+- **Numeração:** o guião pedia «ADR 0007», mas esse número é da D3. Ficou **ADR-0009**. É a terceira fase seguida com o número desatualizado no guião.
+- **Ferramentas do guião ausentes:** a *skill* `metrics-dashboard-generator` e o agente `observability-gap-finder` não estão disponíveis nesta sessão. A análise de lacunas foi feita por um subagente genérico com a pergunta do guião. O Grafana (passo 5, opcional) ficou de fora, como estava no plano.
+- **Desvio ao plano:** o tópico dos eventos de sessão ficou `smartparking:domain-events` e não `session-events`, porque também leva pagamentos e é o destino por omissão de qualquer tipo novo (ADR-0009, ponto 3).
+
+### O que foi feito
+
+1. **Application:**
+   - `Abstractions/Outbox.cs`: `IOutboxStore`, `IOutboxBatch` e `OutboxEntry`;
+   - `Outbox/OutboxRelay.cs`: `OutboxRelay`, `OutboxTopics` e `OutboxRelayOptions`;
+   - `Outbox/OutboxMetrics.cs`;
+   - o `ConfigurationProjector` regista a janela de consistência e abre um span por evento;
+   - `ReadModelMetrics`: novo histograma da janela; o histograma D7 muda de nome.
+2. **Infrastructure.Relational:**
+   - `NpgsqlOutboxStore`, com SQL simples sobre a fonte de dados partilhada;
+   - coluna `trace_parent` (migração `AddOutboxTraceParent`), preenchida pelo `OutboxSaveChangesInterceptor`;
+   - filtro de traces do Npgsql para os comandos de *polling*.
+3. **Workers:** `OutboxRelayService` (BackgroundService), com a secção `Outbox` em `appsettings.json`.
+4. **ServiceDefaults:**
+   - `LatencyTargets.cs` (`Observability:Targets` e o *gauge* `smartparking.target`);
+   - exportador OTLP ativado por `OTEL_EXPORTER_OTLP_ENDPOINT` (pacote `OpenTelemetry.Exporter.OpenTelemetryProtocol` 1.21.0);
+   - *buckets* abaixo de 1 s para os dois histogramas novos.
+5. **Infra:** Jaeger 2.11.0 no perfil `observability`, fixado por *digest*.
+6. **Testes:** `OutboxRelayTests` (8). O `AvailabilityFixture` passa a partilhar o `IMeterFactory` da API com os Workers de teste (ver o problema 3).
+
+### Nomes das métricas (os *scripts* da Fase 9 dependem deles)
+
+| Instrumento OpenTelemetry | Prometheus | Processo | O que mede |
+|---|---|---|---|
+| `smartparking.consistency.window` (`type`) | `smartparking_consistency_window_seconds_{bucket,sum,count}` | Workers | `occurred_at` na outbox → *read model* atualizado (só `Applied`) |
+| `smartparking.outbox.publish_lag` (`type`) | `smartparking_outbox_publish_lag_seconds_{bucket,sum,count}` | Workers | `occurred_at` → publicado no *bus* (todos os tipos) |
+| `smartparking.outbox.published` (`type`) | `smartparking_outbox_published_total` | Workers | linhas publicadas |
+| `smartparking.outbox.batches` (`outcome`) | `smartparking_outbox_batches_total` | Workers | lotes `published` ou `failed` |
+| `smartparking.outbox.pending` | `smartparking_outbox_pending` | Workers | *backlog* (a cada 5 s; ausente se a contagem falhar) |
+| `smartparking.ingestion.e2e_latency` | `smartparking_ingestion_e2e_latency_seconds_{bucket,sum,count}` | Workers | sensor → Redis (D7); era `smartparking_read_model_lag_seconds` |
+| `smartparking.read_model.bus_lag` | `smartparking_read_model_bus_lag_seconds_*` | Workers | receção na API → Redis (sem o relógio do sensor) |
+| `smartparking.target` (`objective`) | `smartparking_target_seconds` | API e Workers | alvos da §6: `uc01_ingestion_e2e_p95`, `uc03_availability_query_p95`, `uc02_session_write_p95` (`consistency_window_p95` vazio) |
+
+Consulta de exemplo: `histogram_quantile(0.95, sum by (le) (rate(smartparking_consistency_window_seconds_bucket[5m])))`. O `grep -i -E "consistency|e2e|latency"` do guião encontra as métricas da janela e da E2E. Há uma ressalva: um histograma só aparece no `/metrics` depois da primeira amostra. Antes de criar ou alterar um parque, e antes de enviar um evento de sensor, o `grep` não devolve essas linhas.
+
+### Como se testou que os testes apanham os erros (mutações)
+
+| Mutação | Resultado |
+|---|---|
+| Sem `FOR UPDATE SKIP LOCKED` (sem bloqueio nenhum) | O teste das duas instâncias falha (duplicados). |
+| Só `FOR UPDATE`, sem `SKIP LOCKED` | Depois da correção do achado 4: `TimeoutException` (a barreira nunca abre). Antes da correção, o teste passava. |
+| *Commit* antes de publicar («no máximo uma vez») | Os dois casos do teste de paragem falham. |
+| Amostra da janela registada sempre com 5 s | O teste de métricas falha. Antes da correção do achado 5, passava. |
+| Sem limpar nem repor o `Activity.Current` | 2 de 3 spans encadeados; o teste falha. |
+
+Todas as mutações foram repostas a partir de cópias e não com `git checkout` (ver o problema 2).
+
+### Problemas encontrados e tentativas falhadas
+
+1. **Heredoc no Git Bash, quinta fase seguida.** Um script Python passado por heredoc (`<<'EOF'`) falhou com «unexpected EOF while looking for matching `'`», e nada foi escrito. Os scripts de edição passaram a ser ficheiros na pasta temporária, executados com `python <ficheiro>`. Noutra edição, um `'\\n'` dentro do heredoc chegou ao C# como uma quebra de linha real e partiu a compilação de um teste. **Regra reforçada:** código e texto com aspas vão sempre por ficheiro, nunca por heredoc.
+2. **Mutação mal reposta, outra vez.** A primeira mutação (sem `SKIP LOCKED`) foi reposta com `git checkout`, mas o ficheiro ainda não estava no git, por isso a mutação ficou ativa. Detetei-o ao ver o SQL e repus a partir da cópia. As mutações seguintes guardaram sempre uma cópia antes. É a mesma lição da Fase 4, que não foi aplicada à primeira.
+3. **O teste de métricas dependia da ordem dos testes.** Passava sozinho e falhava na suite completa. O primeiro diagnóstico estava **errado**: pensei que fosse a *cache* de 300 ms do exportador Prometheus e acrescentei repetições, mas o teste falhou na mesma (15 s de espera). Com uma listagem dos nomes `smartparking_*` exportados, vi que faltavam **todos** os instrumentos de `ReadModelMetrics`, e não só o novo.
+   - **Causa:** o `MeterProvider` da API de teste ouve todos os medidores `SmartParking` do processo, incluindo os dos *hosts* de Workers que os testes criam e descartam. Quando um *host* é descartado, o seu medidor também é. O OpenTelemetry passa a tratar o fluxo com esse nome como terminado e deixa de exportar instrumentos novos com o mesmo nome.
+   - O teste da Fase 4 (`Pipeline_lag_histograms_have_sub_second_buckets`) tinha a mesma fragilidade e só passava pela ordem dos testes.
+   - **Correção:** os Workers de teste usam o `IMeterFactory` da API, como num processo real com uma só fábrica.
+   - **Efeito colateral:** a mensagem de diagnóstico temporária, escrita por heredoc, partiu a compilação (problema 1) e foi removida.
+4. **A primeira mutação do achado 2 ficou incompleta.** Tirei só o `Activity.Current = null`, mas o `finally` que repõe o valor anterior já impedia o encadeamento, e o teste passou. A mutação correta tira as duas linhas e faz o teste falhar.
+5. **A primeira janela medida é muito maior.** No ensaio com a aplicação real, a primeira janela foi de 1,32 s (`FacilityChanged`) e a segunda de 0,08 s (`SpotChanged`). A primeira inclui o primeiro *commit* a frio da API (arranque do EF Core e primeira ligação), porque `occurred_at` é fixado antes do *commit*. Nos *benchmarks* é preciso aquecimento.
+6. **O *backlog* antigo entra nos histogramas.** As 8 linhas por processar das Fases 2b a 4 foram publicadas no arranque dos Workers e entraram no `publish_lag` com cerca de 17 h cada (por exemplo, `FacilityChanged` 3 amostras, soma 96 835 s). A medição está correta, mas na Fase 9 é preciso começar com a outbox vazia e os Workers reiniciados.
+
+### Verificação (resultados reais)
+
+- `dotnet build`: 0 avisos e 0 erros.
+- `dotnet test`: **157/157** antes da revisão (eram 151; mais 6) e **158/158** depois das correções (mais 1: `Rows_without_trace_context_start_independent_traces`). Arquitetura: passou. Integração: cerca de 32 s. A suite completa correu duas vezes seguidas sem falhas.
+- **Ensaio com a aplicação real** (o meu, não o teste manual do Diogo):
+  - compose em execução, `dotnet ef database update` com `AddOutboxTraceParent`, API e Workers com `dotnet run`;
+  - no arranque dos Workers, as 8 linhas antigas ficaram processadas (`pending 0 | total 8`);
+  - parque «Ensaio Fase 5» e um lugar criados por `curl`. Linhas na outbox com `processed_at` preenchido: `SpotChanged` 0,060 s depois do `occurred_at`, `FacilityChanged` 1,315 s (problema 5); `trace_parent` preenchido nas duas;
+  - `/metrics` dos Workers: `smartparking_consistency_window_seconds_count` 1 por tipo (somas 1,322 s e 0,076 s), `smartparking_outbox_pending 0` e `smartparking_target_seconds` 1, 0,2 e 2;
+  - um evento `OCCUPIED` para o lugar novo (`202`): `smartparking_ingestion_e2e_latency_seconds_count 1`, soma 0,285 s;
+  - `GET /api/availability?lat=40.20&lon=-8.41&radius=500`: o parque novo aparece com `spots 1` e `free 0`, **sem reconstrução** (na Fase 4 era preciso o `rebuild-read-model`).
+
+  São amostras isoladas e locais, sem valor estatístico. A D7 e a janela medem-se na Fase 9.
+- **Teste manual (passo 4 do guião):** feito a 16-11-2026, ver o ponto «Resultado» abaixo. Fechar uma sessão no Swagger, repetir a consulta à outbox da Fase 2b (`processed_at` preenchido em poucos segundos) e correr `curl http://localhost:5090/metrics | grep -i -E "consistency|e2e|latency"`. A porta é a dos **Workers** (5090), onde estão o *relay* e os projetores. O `/metrics` da API (5080) não tem a janela nem a E2E: só os alvos, a latência HTTP e as métricas de ingestão.
+  - **Primeira tentativa falhou (16-11-2026).** O comando do guião é para bash e o terminal é o Windows PowerShell 5.1: não existe `grep`, e `curl` é um alias de `Invoke-WebRequest`. Além disso, nem a API nem os Workers estavam a correr, porque foram parados no fim do meu ensaio. **Pré-condição:** os dois processos arrancados (`dotnet run --project src/SmartParking.Api` e `dotnet run --project src/SmartParking.Workers`, em dois terminais). Equivalente em PowerShell: `(Invoke-WebRequest -UseBasicParsing http://localhost:5090/metrics).Content -split "`n" | Select-String 'consistency|e2e|latency'`, ou `curl.exe -s http://localhost:5090/metrics | findstr /I "consistency e2e latency"`.
+  - **Primeira tentativa: registo recusado.** Pediram-me para registar o teste no diário, mas no estado real não havia nenhum `SessionClosed` novo na outbox, e o `/metrics` dos Workers, já arrancados, não tinha amostras. Não registei nenhum resultado e pedi os valores. O Diogo pediu então ao Claude Code que fizesse o teste.
+  - **Resultado** (feito pelo Claude Code, a pedido do Diogo, com a API e os Workers arrancados pelo Diogo; por HTTP, com um script, e não pela interface do Swagger, mas com os mesmos *endpoints* e corpos):
+    - `POST /api/users` → 201; `POST /api/users/{id}/vehicles` → 201; `POST /api/sessions` (lugar da zona Centro) → **201** `Open`; 3 s depois, `POST /api/sessions/{id}/close` com `{}` → **200** `Closed`, `cost 0.02`; `POST /api/sessions/{id}/pay` com `{"method":"Card"}` → **201** `Completed` (sessão `01a1e3bb-9407-7e65-8f8d-99c40dc8efb2`).
+    - A consulta à outbox da Fase 2b, 0,5 s depois do fecho, já mostrava `processed_at` preenchido em todas as linhas:
+
+      | Evento | `processed_at − occurred_at` | `trace_parent` |
+      |---|---|---|
+      | `SessionStarted` | 0,204 s | preenchido |
+      | `SessionClosed` | 0,056 s | preenchido |
+      | `PaymentRegistered` | 0,050 s | preenchido |
+
+    - `XLEN smartparking:domain-events` = 6: estes 3 eventos e os 3 da sessão da Fase 2b, publicados no primeiro arranque do *relay*.
+    - **Com o padrão exato do guião** (`consistency|e2e|latency`, versão PowerShell), depois do fecho da sessão só apareceu `smartparking_target_seconds{objective="uc01_ingestion_e2e_p95"} 1`. É o esperado: os eventos de sessão ainda não têm consumidor no *read model* (Fase 6), por isso medem-se em `smartparking_outbox_publish_lag_seconds` (contagem 1 por tipo, somas 0,204 s, 0,056 s e 0,050 s).
+    - Para completar o teste, criei um lugar no parque «Ensaio Fase 5» (`POST /api/facilities/{id}/spots`) e enviei um evento `OCCUPIED` para esse lugar (`202`). O mesmo comando PowerShell passou a mostrar:
+      - `smartparking_consistency_window_seconds_count{type="SpotChanged"} 1`, com soma 0,139 s;
+      - `smartparking_ingestion_e2e_latency_seconds_count 1`, com soma 0,356 s;
+      - o alvo D7, `smartparking_target_seconds` 1.
+    - São amostras únicas, em local e sem carga, sem valor estatístico.
+
+### Revisões independentes (passo 6)
+
+- **Revisão de código** (`docs/revisoes/fase-5-revisao-codigo.md`): 11 achados (0 altos, 3 médios). Corrigidos antes dos commits:
+  - **1:** *payload* copiado sem nova análise, para não haver falhas por linha;
+  - **2:** spans independentes por linha e *polling* fora dos traces;
+  - **4:** barreira no teste das duas instâncias;
+  - **5:** contagem antes e depois no teste de métricas;
+  - **6:** contagem do *backlog* separada do lote.
+
+  O 3 ficou documentado no teste; do 7 ao 11, no ADR-0009.
+- **Lacunas de observabilidade para as secções 6.2 e 6.5** (`docs/revisoes/fase-5-lacunas-observabilidade.md`):
+  - faltam os *scripts* k6 com taxa de chegada constante e a exportação para CSV (Fase 9);
+  - faltam os *exporters* dos motores e o cAdvisor (CPU, memória, disco);
+  - falta um *gauge* do atraso dos streams por grupo;
+  - correr 2 ou 4 processos de Workers (RNF-02) não é possível sem porta configurável e *label* `consumer`;
+  - falta a reconciliação «enviados vs. persistidos» para o RNF-03;
+  - falta um ponto final comparável com o monolítico. A proposta é a «frescura observável»: do sensor até a consulta refletir o evento.
+
+### O que ficou por medir
+
+- **Alvo da janela de consistência:** não há (`TODO(Diogo)`). Fica vazio em `Observability:Targets:ConsistencyWindowP95`.
+- **Janela ponta a ponta dos eventos de sessão e pagamento:** só se mede até à publicação. O resto chega com o consumidor da Fase 6.
+- **Medições sob carga:** p95 da janela, D7 e UC-02/UC-03, todos com 5 execuções e CSV (Fase 9).
+- **Escalamento:** a janela com 2 e 4 instâncias do *relay* (RNF-02), que precisa da porta configurável.
+- **Contador de amostras negativas** da janela (relógios desalinhados), proposto pela revisão (achado 7).
+- **Recursos por motor e espaço ocupado:** necessários para a secção 6.5.
+
+### Pontos a levar para a próxima fase
+
+- **Fase 6:**
+  - consumidor de `smartparking:domain-events`;
+  - deduplicar pelo `id` da linha da outbox, porque, ao contrário da configuração, os agregados não são de estado completo;
+  - medir a janela até às tabelas de resumo com a mesma definição.
+- **Fase 9:**
+  - outbox vazia, Workers reiniciados e streams `domain-events` esvaziados antes de cada cenário;
+  - API e Workers do mesmo lado quanto ao relógio;
+  - `max by (objective)` nos alvos;
+  - OTLP desligado nas execuções cronometradas;
+  - a ligação do *relay* conta no dimensionamento do *pool* (lembrete já registado);
+  - ações da análise de lacunas.
+- **`TODO(Diogo)`:** alvo da janela de consistência; D7 com um valor único na tese (1 s ou 2 s), que agora é só uma alteração de configuração.

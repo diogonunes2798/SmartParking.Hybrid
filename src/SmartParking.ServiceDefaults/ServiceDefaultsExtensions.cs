@@ -55,9 +55,15 @@ public static class ServiceDefaultsExtensions
     /// <summary>Histogram boundaries (seconds) for a full read model rebuild (ADR-0008).</summary>
     public static double[] RebuildDurationBucketsSeconds { get; } = [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600];
 
-    /// <summary>Histograms of the SmartParking meter that measure pipeline lag (D7).</summary>
+    /// <summary>Histograms of the SmartParking meter that measure pipeline lag (D7) and the consistency window.</summary>
     public static IReadOnlyList<string> PipelineLagInstruments { get; } =
-        ["smartparking.occupancy_log.lag", "smartparking.read_model.lag", "smartparking.read_model.bus_lag"];
+        [
+            "smartparking.occupancy_log.lag", "smartparking.ingestion.e2e_latency", "smartparking.read_model.bus_lag",
+            "smartparking.consistency.window", "smartparking.outbox.publish_lag", // Phase 5 (ADR-0009)
+        ];
+
+    /// <summary>Standard OpenTelemetry variable (or configuration key) that turns on the OTLP trace exporter.</summary>
+    public const string OtlpEndpointVariable = "OTEL_EXPORTER_OTLP_ENDPOINT";
 
     // Instrumentation names emitted natively by Npgsql and EF Core (System.Diagnostics), referenced by name so
     // that ServiceDefaults does not depend on storage drivers (ADR-0001).
@@ -78,6 +84,14 @@ public static class ServiceDefaultsExtensions
         var serviceVersion = typeof(ServiceDefaultsExtensions).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
 
+        // Optional trace export (Phase 5, ADR-0009): only when an OTLP endpoint is configured (e.g. the Jaeger of the
+        // compose `observability` profile, OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317). Without it, traces are
+        // created but not exported, and nothing changes for the measurements.
+        var exportTraces = !string.IsNullOrWhiteSpace(builder.Configuration[OtlpEndpointVariable]);
+
+        builder.Services.Configure<LatencyTargetOptions>(builder.Configuration.GetSection(LatencyTargetOptions.SectionName));
+        builder.Services.AddHostedService<LatencyTargetsGauge>();
+
         builder.Services.AddOpenTelemetry()
             .ConfigureResource(resource => resource
                 .AddService(serviceName, SmartParkingTelemetry.ServiceNamespace, serviceVersion)
@@ -88,7 +102,8 @@ public static class ServiceDefaultsExtensions
                 .AddSource(NpgsqlInstrumentationName)
                 // Probes and scrapes would drown the traces that matter for the measurements.
                 .AddAspNetCoreInstrumentation(o => o.Filter = ctx => !IsInfrastructurePath(ctx.Request.Path))
-                .AddHttpClientInstrumentation())
+                .AddHttpClientInstrumentation()
+                .AddOtlpExporterIf(exportTraces))
             .WithMetrics(metrics => metrics
                 .AddMeter(SmartParkingTelemetry.MeterName)
                 .AddMeter(NpgsqlInstrumentationName, EntityFrameworkCoreMeterName)
@@ -139,6 +154,9 @@ public static class ServiceDefaultsExtensions
 
         return app;
     }
+
+    private static TracerProviderBuilder AddOtlpExporterIf(this TracerProviderBuilder tracing, bool enabled) =>
+        enabled ? tracing.AddOtlpExporter() : tracing;
 
     private static bool IsInfrastructurePath(PathString path) =>
         path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase)
