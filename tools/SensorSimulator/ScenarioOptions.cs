@@ -85,6 +85,15 @@ internal sealed record ScenarioOptions
     /// </summary>
     public bool FreeAtEnd { get; init; } = true;
 
+    /// <summary>
+    /// CSV file to which the run summary is appended, in the format of spec §6 (cenário, variante, métrica, valor,
+    /// unidade, execução, configuração); null = console only. Convention: <c>results/&lt;scenario&gt;/&lt;yyyy-MM-dd_HHmm&gt;.csv</c>.
+    /// </summary>
+    public string? SummaryCsv { get; init; }
+
+    /// <summary>Variant under test (spec §7): <c>hybrid</c> or <c>monolithic</c>. Only labels the CSV.</summary>
+    public string Variant { get; init; } = "hybrid";
+
     /// <summary>Print the event sequence as NDJSON instead of sending it (no HTTP).</summary>
     public bool DryRun { get; init; }
 
@@ -98,7 +107,7 @@ internal sealed record ScenarioOptions
 
     /// <summary>The peak windows actually used (see <see cref="PeakWindows"/>).</summary>
     public IReadOnlyList<PeakWindow> EffectivePeakWindows =>
-        PeakFactor > 1 && PeakWindows.Count == 0
+        PeakFactor > 1 && (PeakWindows is null || PeakWindows.Count == 0)
             ? [new PeakWindow(DurationSeconds * 0.45, DurationSeconds * 0.10)]
             : PeakWindows;
 
@@ -140,6 +149,20 @@ internal sealed record ScenarioOptions
         return Gen2InitialRatio + ((Gen2Ratio - Gen2InitialRatio) * progress);
     }
 
+    /// <summary>
+    /// Every parameter that shapes the run, in one line without commas (a CSV cell). Also salts the event ids, so that
+    /// two runs with different parameters never share ids (see <see cref="OccupancyEventGenerator"/>).
+    /// </summary>
+    public string Describe()
+    {
+        var windows = string.Join('|', (PeakWindows ?? []).Select(w => string.Create(CultureInfo.InvariantCulture, $"{w.StartSeconds}+{w.DurationSeconds}")));
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"name={Name};facilities={Facilities};spots={Spots};rate={Rate};peak={PeakFactor};windows={windows};duration={DurationSeconds};" +
+            $"gen2={Gen2InitialRatio}->{Gen2Ratio}@{Gen2RampStartSeconds?.ToString(CultureInfo.InvariantCulture) ?? "none"}+{Gen2RampDurationSeconds};" +
+            $"seed={Seed};batch={BatchSize};window={BatchWindowMs};concurrency={Concurrency};freeAtEnd={FreeAtEnd}");
+    }
+
     /// <summary>Returns the problems of this scenario (empty when valid).</summary>
     public IReadOnlyList<string> Validate()
     {
@@ -161,6 +184,9 @@ internal sealed record ScenarioOptions
         Check(Gen2InitialRatio is >= 0 and <= 1, "gen2-initial-ratio must be between 0 and 1.");
         Check(Gen2RampStartSeconds is null or >= 0, "gen2-ramp-start must not be negative.");
         Check(Gen2RampDurationSeconds >= 0, "gen2-ramp-duration must not be negative.");
+        Check(
+            Gen2RampStartSeconds is null || Gen2InitialRatio <= Gen2Ratio,
+            "gen2-initial-ratio must not exceed gen2-ratio: a second-generation sensor never goes back to generation 1.");
         Check(BatchSize is >= 1 and <= 1000, "batch-size must be between 1 and 1000 (API limit).");
         Check(BatchWindowMs >= 10, "batch-window-ms must be at least 10.");
         Check(Concurrency >= 1, "concurrency must be at least 1.");
@@ -168,7 +194,10 @@ internal sealed record ScenarioOptions
         Check(Run >= 1, "run must be at least 1.");
         Check(WaitReadModelSeconds >= 0, "wait-read-model must not be negative.");
         Check(Uri.TryCreate(Api, UriKind.Absolute, out _), "api must be an absolute URL.");
-        foreach (var w in PeakWindows)
+        Check(PeakWindows is not null, "peakWindows must be a list (use [] for none).");
+        Check(!string.IsNullOrWhiteSpace(Name) && Name.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_'),
+            "name must use only letters, digits, '-' and '_' (it names facilities and result folders).");
+        foreach (var w in PeakWindows ?? [])
         {
             Check(w.StartSeconds >= 0 && w.DurationSeconds > 0, "peak windows need start >= 0 and duration > 0.");
         }
@@ -208,7 +237,16 @@ internal sealed record ScenarioOptions
             values[key[2..]] = value;
         }
 
-        var options = values.Remove("scenario", out var file) && file is not null ? Load(file) : new ScenarioOptions();
+        ScenarioOptions options;
+        if (values.Remove("scenario", out var file))
+        {
+            options = Load(file ?? throw new ArgumentException("Option '--scenario' needs a file path."));
+        }
+        else
+        {
+            options = new ScenarioOptions();
+        }
+
         foreach (var (key, value) in values)
         {
             options = Apply(options, key, value);
@@ -230,7 +268,7 @@ internal sealed record ScenarioOptions
         "gen2-initial-ratio" => o with { Gen2InitialRatio = Ratio(key, value) },
         "gen2-ramp-start" => o with { Gen2RampStartSeconds = Number(key, value) },
         "gen2-ramp-duration" => o with { Gen2RampDurationSeconds = Number(key, value) },
-        "seed" => o with { Seed = long.Parse(Text(key, value), NumberStyles.Integer, CultureInfo.InvariantCulture) },
+        "seed" => o with { Seed = Long(key, value) },
         "run" => o with { Run = Int(key, value) },
         "batch-size" => o with { BatchSize = Int(key, value) },
         "batch-window-ms" => o with { BatchWindowMs = Int(key, value) },
@@ -240,11 +278,18 @@ internal sealed record ScenarioOptions
         "wait-read-model" => o with { WaitReadModelSeconds = Int(key, value) },
         "free-at-end" => o with { FreeAtEnd = Flag(key, value) },
         "dry-run" => o with { DryRun = Flag(key, value) },
+        "summary-csv" => o with { SummaryCsv = Text(key, value) },
+        "variant" => o with { Variant = Text(key, value) },
         _ => throw new ArgumentException($"Unknown option '--{key}'."),
     };
 
     private static string Text(string key, string? value) =>
         value ?? throw new ArgumentException($"Option '--{key}' needs a value.");
+
+    private static long Long(string key, string? value) =>
+        long.TryParse(Text(key, value), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)
+            ? n
+            : throw new ArgumentException($"Option '--{key}' needs an integer between {long.MinValue} and {long.MaxValue}.");
 
     private static int Int(string key, string? value) =>
         int.TryParse(Text(key, value), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)

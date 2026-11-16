@@ -40,14 +40,17 @@ internal readonly record struct SimulatedEvent(
 /// <item>each arrival picks a spot uniformly at random, so each spot sees one event every <c>spots / rate</c> seconds
 /// on average (D8: 5 000 / 16.67 = 300 s);</item>
 /// <item>the event toggles the spot: FREED → OCCUPIED → FREED…, so a spot is never OCCUPIED twice in a row. All spots
-/// start FREE, the same initial state as the read model (ADR-0008);</item>
+/// start FREE, the same initial state as the read model (ADR-0008). Two events of one spot are at least
+/// <see cref="MinGapSeconds"/> apart;</item>
 /// <item>each sensor gets a fixed threshold in [0, 1); it reports as generation 2 while the current
 /// <see cref="ScenarioOptions.Gen2RatioAt"/> is above it. As the share grows, sensors move to generation 2 and stay
 /// there, like sensors replaced in the field.</item>
 /// </list>
 /// Arrivals, spots, types and times come from one random stream, sensor thresholds, readings and event ids from
-/// others. So changing the generation-2 share does not change the load (the same events, some with a richer payload),
-/// and changing <see cref="ScenarioOptions.Run"/> changes only the event ids.
+/// others. So changing the generation-2 share does not change the load (the same times, spots and types, some with a
+/// richer payload), and changing <see cref="ScenarioOptions.Run"/> changes only the event ids. Event ids are salted
+/// with <see cref="ScenarioOptions.Describe"/>: any change of parameters also gives new ids, so two different runs
+/// against the same database are never dropped as duplicates.
 /// </summary>
 internal sealed class OccupancyEventGenerator
 {
@@ -55,6 +58,15 @@ internal sealed class OccupancyEventGenerator
     private const ulong ThresholdStream = 2;
     private const ulong ReadingStream = 3;
     private const ulong IdStreamBase = 1000;
+
+    /// <summary>
+    /// Minimum time between two events of the same spot. The read model orders a spot's events by timestamp in
+    /// milliseconds and breaks ties by <c>eventId</c> (ADR-0008), and MongoDB stores milliseconds; two events of one
+    /// spot within the same millisecond could be applied in the wrong order and leave the spot OCCUPIED (Phase 7 code
+    /// review, M1). An arrival closer than this to the spot's previous event is dropped; at D8 this happens about
+    /// twice in 77 000 events, so the rate is unaffected.
+    /// </summary>
+    public const double MinGapSeconds = 0.001;
 
     private readonly ScenarioOptions _options;
     private readonly IReadOnlyList<PeakWindow> _peakWindows;
@@ -90,8 +102,13 @@ internal sealed class OccupancyEventGenerator
     {
         var arrivals = new Xoshiro256(_options.Seed, ArrivalStream);
         var readings = new Xoshiro256(_options.Seed, ReadingStream);
-        var ids = new Xoshiro256(_options.Seed, IdStreamBase + (ulong)_options.Run);
+        // Ids depend on the run number AND on every parameter of the run: before, two runs with the same seed and --run
+        // but different parameters (a 5 000 ev/s check, then the pilot) produced the same ids, and the log dropped the
+        // whole pilot as duplicates (Phase 7 diary). Arrivals, spots and types still depend only on the load parameters.
+        var ids = new Xoshiro256(_options.Seed ^ (long)Fnv1a64(_options.Describe()), IdStreamBase + (ulong)_options.Run);
         var occupied = new bool[_options.Spots];
+        var lastSeconds = new double[_options.Spots];
+        Array.Fill(lastSeconds, double.NegativeInfinity);
         var maxRate = MaxRate;
         var duration = _options.DurationSeconds;
         long sequence = 0;
@@ -112,6 +129,12 @@ internal sealed class OccupancyEventGenerator
             }
 
             var spot = arrivals.NextInt(_options.Spots);
+            if (seconds - lastSeconds[spot] < MinGapSeconds)
+            {
+                continue; // same millisecond as the spot's previous event: dropped (see MinGapSeconds)
+            }
+
+            lastSeconds[spot] = seconds;
             occupied[spot] = !occupied[spot];
             yield return Create(sequence++, seconds, spot, occupied[spot], ids, readings);
         }
@@ -121,14 +144,27 @@ internal sealed class OccupancyEventGenerator
             yield break;
         }
 
+        // One millisecond after the end, so that no closing event shares a millisecond with the spot's last event.
+        var closing = duration + MinGapSeconds;
         for (var spot = 0; spot < occupied.Length; spot++)
         {
             if (occupied[spot])
             {
                 occupied[spot] = false;
-                yield return Create(sequence++, duration, spot, occupied: false, ids, readings);
+                yield return Create(sequence++, closing, spot, occupied: false, ids, readings);
             }
         }
+    }
+
+    private static ulong Fnv1a64(string text)
+    {
+        var hash = 14695981039346656037UL;
+        foreach (var c in text)
+        {
+            hash = unchecked((hash ^ c) * 1099511628211UL);
+        }
+
+        return hash;
     }
 
     /// <summary>Generation of the sensor of <paramref name="spot"/> at <paramref name="seconds"/>.</summary>

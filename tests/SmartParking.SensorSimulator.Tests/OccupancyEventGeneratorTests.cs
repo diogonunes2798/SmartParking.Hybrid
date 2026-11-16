@@ -48,12 +48,50 @@ public sealed class OccupancyEventGeneratorTests
         Assert.Equal(308, events.Count);
         Assert.Equal(
             [
-                (2_713_551L, 39, 1, true, Guid.Parse("b16ffaf4-b446-49cb-a96f-4cb4d3bc268d")),
-                (3_387_922L, 10, 0, true, Guid.Parse("5eab563f-cfa0-48c2-be12-1a2b6c76f783")),
-                (7_430_386L, 47, 1, true, Guid.Parse("0f0cad17-bf85-4fa5-8ab2-5237f3598817")),
+                (2_713_551L, 39, 1, true, Guid.Parse("4ec3ec78-8192-4ecd-adab-089e55456f5c")),
+                (3_387_922L, 10, 0, true, Guid.Parse("0197d513-2623-4ad4-8fe5-c133897b2630")),
+                (7_430_386L, 47, 1, true, Guid.Parse("7fd641bc-8c29-4423-b27b-65031340c96d")),
             ],
             events.Take(3).Select(e => (e.OffsetTicks, e.SpotIndex, e.FacilityIndex, e.Occupied, e.EventId)));
-        Assert.Equal(Guid.Parse("59ec29fd-cbee-4168-bb50-5de9c98fa831"), events[^1].EventId);
+        Assert.Equal(Guid.Parse("c95a6948-d5d1-4adf-8adf-635ee2e5ead2"), events[^1].EventId);
+
+        // Generation 2 pins the readings stream too (review L6).
+        var gen2 = Run(options with { Gen2Ratio = 1 })[0];
+        Assert.Equal((2, new Gen2Readings(17.5, 12, 83.1)), (gen2.Generation, gen2.Readings));
+        Assert.Equal(events[0].OffsetTicks, gen2.OffsetTicks); // same load whatever the generation
+    }
+
+    [Fact]
+    public void Two_events_of_one_spot_are_at_least_a_millisecond_apart()
+    {
+        // Phase 7 code review, M1: the read model and MongoDB keep milliseconds; with seed 42 the D8 scenario had two
+        // OCCUPIED → FREED pairs 0.29 ms and 0.43 ms apart before the minimum gap was added.
+        var d8 = ScenarioOptions.Load(Path.Combine("scenarios", "d8-reference.json"));
+        var last = new Dictionary<int, long>();
+        var minGapTicks = (long)(OccupancyEventGenerator.MinGapSeconds * TimeSpan.TicksPerSecond);
+
+        foreach (var e in Run(d8))
+        {
+            if (last.TryGetValue(e.SpotIndex, out var previous))
+            {
+                Assert.True(e.OffsetTicks - previous >= minGapTicks, $"spot {e.SpotIndex}: events {e.OffsetTicks - previous} ticks apart at {e.Sequence}");
+            }
+
+            last[e.SpotIndex] = e.OffsetTicks;
+        }
+    }
+
+    [Fact]
+    public void Each_scenario_gets_its_own_block_of_the_map()
+    {
+        // Phase 7 code review, M4: before, facility 0 of every scenario sat at the integration tests' point.
+        var names = new[] { "smoke", "d8", "schema-evolution-pilot", "adhoc" };
+        var first = names.Select(n => Topology.Location(n, 0)).ToList();
+
+        Assert.Equal(first.Count, first.Distinct().Count());
+        Assert.DoesNotContain((40.2033, -8.4103), first);
+        Assert.Equal(Topology.Location("d8", 0), Topology.Location("d8", 0)); // stable
+        Assert.NotEqual(Topology.Location("d8", 0), Topology.Location("d8", 1));
     }
 
     [Fact]
@@ -85,7 +123,8 @@ public sealed class OccupancyEventGeneratorTests
     {
         var events = Run(Smoke);
         Assert.All(events.Zip(events.Skip(1)), p => Assert.True(p.First.OffsetTicks <= p.Second.OffsetTicks));
-        Assert.All(events, e => Assert.InRange(e.Offset.TotalSeconds, 0, Smoke.DurationSeconds));
+        // Closing FREED events (FreeAtEnd) are one minimum gap after the end.
+        Assert.All(events, e => Assert.InRange(e.Offset.TotalSeconds, 0, Smoke.DurationSeconds + OccupancyEventGenerator.MinGapSeconds));
         Assert.Equal(Enumerable.Range(0, events.Count).Select(i => (long)i), events.Select(e => e.Sequence));
     }
 
@@ -179,8 +218,8 @@ public sealed class OccupancyEventGeneratorTests
     public void Gen2_share_does_not_change_the_load()
     {
         // Same arrivals, spots, types and ids whatever the share of generation 2 (comparable runs in UC-05).
-        static IEnumerable<(long, int, bool, Guid)> Load(IEnumerable<SimulatedEvent> events) =>
-            events.Select(e => (e.OffsetTicks, e.SpotIndex, e.Occupied, e.EventId));
+        static IEnumerable<(long, int, bool)> Load(IEnumerable<SimulatedEvent> events) =>
+            events.Select(e => (e.OffsetTicks, e.SpotIndex, e.Occupied));
 
         Assert.Equal(Load(Run(Smoke with { Gen2Ratio = 0 })), Load(Run(Smoke with { Gen2Ratio = 1 })));
     }
@@ -195,6 +234,18 @@ public sealed class OccupancyEventGeneratorTests
         Assert.Empty(run1.Select(e => e.EventId).Intersect(run2.Select(e => e.EventId)));
         Assert.Equal(run1.Count, run1.Select(e => e.EventId).Distinct().Count());
         Assert.All(run1, e => Assert.Equal(4, e.EventId.Version));
+    }
+
+    [Fact]
+    public void Runs_with_different_parameters_never_share_event_ids()
+    {
+        // Phase 7 diary: a 5 000 ev/s check with --run 2, then the pilot with --run 2 and the same seed. The ids were
+        // the same, and the log dropped the whole pilot as duplicates. Ids are now salted with every parameter.
+        var pilot = ScenarioOptions.Load(Path.Combine("scenarios", "schema-evolution-pilot.json")) with { Run = 2, DurationSeconds = 20 };
+        var check = pilot with { Rate = 5000, Gen2RampStartSeconds = 0, FreeAtEnd = false };
+
+        var pilotIds = Run(pilot).Select(e => e.EventId).ToHashSet();
+        Assert.DoesNotContain(Run(check), e => pilotIds.Contains(e.EventId));
     }
 
     private static byte[] Serialise(IEnumerable<SimulatedEvent> events)

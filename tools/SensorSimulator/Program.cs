@@ -5,7 +5,8 @@ namespace SmartParking.SensorSimulator;
 
 /// <summary>
 /// SensorSimulator (spec §8; UC-01, UC-05). Usage: see tools/SensorSimulator/README.md.
-/// Exit codes: 0 clean run, 1 events rejected or failed, 2 bad arguments, 3 setup failed (provisioning, read model).
+/// Exit codes: 0 clean run, 1 events rejected or failed (or run cancelled), 2 bad arguments, 3 setup failed
+/// (provisioning, read model), 4 clean but saturated (offered load not kept: not a valid API measurement).
 /// Not a top-level program: the integration tests reference this assembly and the API, and two global
 /// <c>Program</c> types would clash.
 /// </summary>
@@ -80,14 +81,21 @@ internal static class SimulatorProgram
                 return 3;
             }
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException
+                                       or InvalidOperationException or NotSupportedException)
         {
-            Console.Error.WriteLine($"Setup failed: {ex.Message}");
+            Console.Error.WriteLine($"Setup failed ({ex.GetType().Name}): {ex.Message}");
             return 3;
         }
 
         var summary = await new LoadRunner(http, options, topology, Console.Out).RunAsync(generator.Generate(), cancellation.Token);
         Console.WriteLine(summary);
-        return summary.Clean ? 0 : 1;
+        if (options.SummaryCsv is { } csv)
+        {
+            SummaryCsvWriter.Append(csv, options, summary);
+            Console.WriteLine($"Summary appended to {csv}");
+        }
+
+        return !summary.Clean ? 1 : summary.Saturated ? 4 : 0;
     }
 }

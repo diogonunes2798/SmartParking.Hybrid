@@ -41,13 +41,32 @@ internal sealed record Topology(Guid[] FacilityIds, Guid[] SpotIds, Guid[] Senso
         string.Create(CultureInfo.InvariantCulture, $"sim-{scenario}-Z{facility:000}");
 
     /// <summary>
-    /// Facilities on a grid around Coimbra (≈ 40.2033, -8.4103), about 300 m apart, so that a small availability
-    /// radius around one facility finds only that facility.
+    /// Facilities on a grid about 300 m apart, so that a small availability radius around one facility finds only that
+    /// facility. Each scenario gets its own block of the map, chosen by a stable hash of its name (64 blocks of
+    /// 0.07° × 0.07° north and west of Coimbra, none at the point used by the integration tests, 40.2033, -8.4103),
+    /// so that facilities of different scenarios do not overlap (Phase 7 code review, M4). A block holds 400
+    /// facilities (20 × 20); larger scenarios spill into the next block.
     /// </summary>
-    public static (double Latitude, double Longitude) Location(int facility)
+    public static (double Latitude, double Longitude) Location(string scenario, int facility)
     {
         const int columns = 20;
         const double step = 0.003; // ≈ 330 m in latitude, ≈ 255 m in longitude at 40° N
-        return (40.2033 + ((facility / columns) * step), -8.4103 + ((facility % columns) * step));
+        const double blockSize = 0.07;
+        var block = (int)(Fnv1a(scenario) % 64);
+        var baseLatitude = 40.30 + ((block / 8) * blockSize);
+        var baseLongitude = -8.90 + ((block % 8) * blockSize);
+        return (baseLatitude + ((facility / columns) * step), baseLongitude + ((facility % columns) * step));
+    }
+
+    /// <summary>32-bit FNV-1a: stable across processes and .NET versions, unlike <see cref="string.GetHashCode()"/>.</summary>
+    private static uint Fnv1a(string text)
+    {
+        var hash = 2166136261u;
+        foreach (var c in text)
+        {
+            hash = unchecked((hash ^ c) * 16777619u);
+        }
+
+        return hash;
     }
 }

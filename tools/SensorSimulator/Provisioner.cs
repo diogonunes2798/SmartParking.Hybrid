@@ -18,6 +18,8 @@ internal sealed class Provisioner(HttpClient http, ScenarioOptions options, Text
     private const int PageSize = 200; // PageRequest.MaxTake
     private const int ParallelCreates = 8;
 
+    private readonly Dictionary<int, (double Latitude, double Longitude)> _locations = [];
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter() },
@@ -35,6 +37,7 @@ internal sealed class Provisioner(HttpClient http, ScenarioOptions options, Text
         var byName = existingFacilities.GroupBy(f => f.Name, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
         var created = new Counts();
+        _locations.Clear();
 
         var firstSpot = 0;
         for (var f = 0; f < options.Facilities; f++)
@@ -48,6 +51,7 @@ internal sealed class Provisioner(HttpClient http, ScenarioOptions options, Text
             }
 
             facilityIds[f] = facility.Id;
+            _locations[f] = (facility.Location.Coordinates[1], facility.Location.Coordinates[0]); // GeoJSON: lon, lat
             await ProvisionSpotsAsync(facility.Id, firstSpot, count, spotIds, created, ct);
             firstSpot += count;
         }
@@ -78,7 +82,8 @@ internal sealed class Provisioner(HttpClient http, ScenarioOptions options, Text
         {
             foreach (var f in pending.ToArray())
             {
-                var (lat, lon) = Topology.Location(f);
+                // The facility's actual location: one created by an older version of the simulator may sit elsewhere.
+                var (lat, lon) = _locations[f];
                 var url = string.Create(CultureInfo.InvariantCulture, $"/api/availability?lat={lat}&lon={lon}&radius=50&limit=200");
                 var found = await http.GetFromJsonAsync<List<FacilityAvailabilityDto>>(url, Json, ct) ?? [];
                 var expected = Topology.SpotsIn(f, options.Facilities, options.Spots);
@@ -109,7 +114,8 @@ internal sealed class Provisioner(HttpClient http, ScenarioOptions options, Text
 
     private async Task<FacilityDto> CreateFacilityAsync(int f, string name, int capacity, CancellationToken ct)
     {
-        var (lat, lon) = Topology.Location(f);
+        EnsureMayCreate($"facility '{name}'");
+        var (lat, lon) = Topology.Location(options.Name, f);
         var body = new
         {
             name,
@@ -133,6 +139,7 @@ internal sealed class Provisioner(HttpClient http, ScenarioOptions options, Text
             var code = Topology.SpotCode(j);
             if (!existing.TryGetValue(code, out var id))
             {
+                EnsureMayCreate($"spot '{code}' of facility {facilityId}");
                 id = (await PostAsync<SpotDto>($"/api/facilities/{facilityId}/spots", new { code, allowedVehicleType = "Car" }, token)).Id;
                 Interlocked.Increment(ref created.Spots);
             }
@@ -158,6 +165,7 @@ internal sealed class Provisioner(HttpClient http, ScenarioOptions options, Text
         {
             if (!existing.TryGetValue(spotIds[i], out var id))
             {
+                EnsureMayCreate($"the sensor of spot {spotIds[i]}");
                 var body = new { spotId = spotIds[i], model = "SIM-OCC", firmwareVersion = "1.0.0", status = "Active" };
                 id = (await PostAsync<SensorDto>("/api/sensors", body, token)).Id;
                 Interlocked.Increment(ref created.Sensors);
@@ -165,6 +173,15 @@ internal sealed class Provisioner(HttpClient http, ScenarioOptions options, Text
 
             sensorIds[i] = id;
         });
+    }
+
+    /// <summary><c>--provision false</c>: only look up what exists, and stop if anything is missing (review M3).</summary>
+    private void EnsureMayCreate(string what)
+    {
+        if (!options.Provision)
+        {
+            throw new InvalidOperationException($"Missing {what} and --provision is false. Run once with --provision true.");
+        }
     }
 
     private async Task<List<T>> ListAllAsync<T>(string path, CancellationToken ct)
@@ -203,7 +220,9 @@ internal sealed class Provisioner(HttpClient http, ScenarioOptions options, Text
     }
 
     // Minimal copies of the API contracts (the simulator does not reference src/ on purpose).
-    private sealed record FacilityDto(Guid Id, string Name);
+    private sealed record FacilityDto(Guid Id, string Name, GeoPointDto Location);
+
+    private sealed record GeoPointDto(IReadOnlyList<double> Coordinates);
 
     private sealed record SpotDto(Guid Id, string Code);
 

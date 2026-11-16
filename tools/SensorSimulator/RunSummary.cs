@@ -56,7 +56,7 @@ internal sealed record RunSummary(
         var sb = new StringBuilder();
         sb.AppendLine(c, $"--- Summary: scenario '{Scenario}', seed {Seed}, run {Run}, {Elapsed.TotalSeconds:F1} s{(Cancelled ? " (CANCELLED: partial numbers)" : "")} ---");
         sb.AppendLine(c, $"Sent:       {Sent} events (generation 1: {SentGen1}, generation 2: {SentGen2}) in {Requests} requests");
-        sb.AppendLine(c, $"Accepted:   {Accepted} (202)");
+        sb.AppendLine(c, $"Accepted:   {Accepted} (202 from the API; not proof of storage: a repeated --run is dropped as duplicate downstream)");
         sb.AppendLine(c, $"Rejected:   {Rejected} (RF-01 validation, 202 partial or 400)");
         sb.AppendLine(c, $"Errors:     {Errors + NoResponse} ({Errors} events in non-202/400 answers, {NoResponse} events without an answer)");
         if (DuplicatesInBatch > 0)
