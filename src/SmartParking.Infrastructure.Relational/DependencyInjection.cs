@@ -45,7 +45,10 @@ public static class DependencyInjection
             ?? throw new InvalidOperationException($"Missing connection string '{ConnectionStringName}'.");
 
         // A single connection pool for EF Core and the health check (Phase 1 review note).
-        services.AddNpgsqlDataSource(connectionString);
+        // The relay's polling commands are not traced: ~10 root traces per second per Workers instance would bury the
+        // useful ones (review of Phase 5, finding 2).
+        services.AddNpgsqlDataSource(connectionString, data => data.ConfigureTracing(tracing => tracing
+            .ConfigureCommandFilter(command => !command.CommandText.StartsWith(NpgsqlOutboxStore.PollingMarker, StringComparison.Ordinal))));
 
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<ICurrentActor>(new FixedActor(AnonymousActor));
@@ -74,6 +77,7 @@ public static class DependencyInjection
         services.AddScoped<IConfigurationQueries, EfConfigurationQueries>();
         services.AddScoped<IAvailabilitySource, EfAvailabilitySource>(); // read model rebuild (Phase 4, ADR-0008)
         services.AddScoped<ISessionQueries, EfSessionQueries>();
+        services.TryAddSingleton<IOutboxStore, NpgsqlOutboxStore>(); // outbox relay (Phase 5, ADR-0009)
 
         services.AddHealthChecks()
             .AddNpgSql(name: HealthCheckName, tags: healthCheckTags, timeout: TimeSpan.FromSeconds(3));

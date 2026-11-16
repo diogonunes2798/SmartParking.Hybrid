@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
@@ -47,20 +48,25 @@ public sealed class OutboxSaveChangesInterceptor : SaveChangesInterceptor
             return;
         }
 
+        // The request's trace context (ASP.NET Core activity), so the relay can continue the trace (ADR-0009).
+        var current = Activity.Current;
+        var traceParent = current?.IdFormat == ActivityIdFormat.W3C ? current.Id : null;
+
         var messages = context.ChangeTracker.Entries<IHasDomainEvents>()
             .SelectMany(e => e.Entity.DequeueDomainEvents())
-            .Select(ToMessage)
+            .Select(e => ToMessage(e, traceParent))
             .ToList(); // materialise before adding to the tracker being enumerated
 
         context.AddRange(messages);
     }
 
-    private static OutboxMessage ToMessage(IDomainEvent domainEvent) => new()
+    private static OutboxMessage ToMessage(IDomainEvent domainEvent, string? traceParent) => new()
     {
         Id = Guid.CreateVersion7(domainEvent.OccurredAt),
         Type = domainEvent.GetType().Name,
         AggregateId = domainEvent.AggregateId,
         Payload = JsonSerializer.Serialize(domainEvent, domainEvent.GetType(), PayloadJson),
         OccurredAt = domainEvent.OccurredAt,
+        TraceParent = traceParent,
     };
 }
