@@ -16,7 +16,7 @@ internal static class ApplicationRegistration
 {
     public static IServiceCollection AddApplicationHandlers(this IServiceCollection services, IConfiguration configuration)
     {
-        // UC-01 (ingestion, steps 1–2). The bus (IEventBus) is registered by Infrastructure.Messaging.
+        // UC-01 (ingestion, steps 1–2). The bus (IEventBus) is registered by Infrastructure.Messaging (hybrid) or by AddMonolithicPersistence (ADR-0012).
         services.AddSingleton(configuration.GetSection("Ingestion").Get<IngestionSettings>() ?? new IngestionSettings());
         services.AddSingleton<OccupancyIngestionMetrics>();
         services.TryAddSingleton(TimeProvider.System);

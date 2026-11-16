@@ -6,8 +6,10 @@ using SmartParking.Infrastructure.Cache;
 using SmartParking.Infrastructure.Documents;
 using SmartParking.Infrastructure.Messaging;
 using SmartParking.Infrastructure.Relational;
+using SmartParking.Infrastructure.Relational.Monolithic;
 using SmartParking.ServiceDefaults;
 using SmartParking.Workers.Analytics;
+using SmartParking.Workers.Monolithic;
 using SmartParking.Workers.Outbox;
 using SmartParking.Workers.ReadModel;
 
@@ -30,17 +32,35 @@ var builder = WebApplication.CreateBuilder(rebuildOnly ? args[1..] : args);
 
 builder.AddServiceDefaults("smartparking-workers");
 
-var readiness = ServiceDefaultsExtensions.ReadinessTags;
-builder.Services
-    .AddRelationalPersistence(builder.Configuration, readiness)
-    .AddDocumentPersistence(builder.Configuration, readiness)
-    .AddCacheStore(builder.Configuration, readiness)
-    .AddEventBus(builder.Configuration); // also the consumer group positions used by the rebuild
+// Persistence:Mode (spec §7, ADR-0012). Monolithic: PostgreSQL only. There is no bus to consume and no read model to
+// project (the API writes the events and the spot states synchronously), so only the outbox relay, the analytics
+// aggregation and the partition maintenance run here.
+var monolithic = builder.Configuration.GetPersistenceMode() == PersistenceMode.Monolithic;
+if (monolithic && command == RebuildCommand)
+{
+    Console.Error.WriteLine($"'{RebuildCommand}' does not apply to Persistence:Mode=Monolithic: there is no read model to rebuild.");
+    Environment.ExitCode = 1;
+    return;
+}
 
-// Availability read model (UC-03, RF-03, Phase 4, ADR-0008): rebuild, initial load and the two projectors.
-builder.Services.AddSingleton<ReadModelMetrics>();
-builder.Services.AddSingleton<ReadModelGate>();
-builder.Services.AddScoped<ReadModelRebuilder>();
+var readiness = ServiceDefaultsExtensions.ReadinessTags;
+builder.Services.AddRelationalPersistence(builder.Configuration, readiness);
+if (monolithic)
+{
+    builder.Services.AddMonolithicPersistence(builder.Configuration);
+}
+else
+{
+    builder.Services
+        .AddDocumentPersistence(builder.Configuration, readiness)
+        .AddCacheStore(builder.Configuration, readiness)
+        .AddEventBus(builder.Configuration); // also the consumer group positions used by the rebuild
+
+    // Availability read model (UC-03, RF-03, Phase 4, ADR-0008): rebuild, initial load and the two projectors.
+    builder.Services.AddSingleton<ReadModelMetrics>();
+    builder.Services.AddSingleton<ReadModelGate>();
+    builder.Services.AddScoped<ReadModelRebuilder>();
+}
 
 // Occupancy aggregation (UC-04, RF-05, Phase 6, D4 default, ADR-0010): MongoDB log → analytics.occupancy_hourly.
 // Settings: Analytics (Enabled, Interval, AllowedLateness, ReaggregateHours, MaxHoursPerRun, ...).
@@ -50,7 +70,13 @@ builder.Services.AddSingleton(analytics);
 builder.Services.AddSingleton<AnalyticsMetrics>();
 builder.Services.AddScoped<OccupancyAggregator>();
 
-if (!rebuildOnly)
+if (!rebuildOnly && monolithic)
+{
+    // Monthly partitions of monolith.occupancy_events, created ahead (ADR-0012). Settings: Persistence:Monolithic.
+    builder.Services.AddHostedService<PartitionMaintenanceService>();
+}
+
+if (!rebuildOnly && !monolithic)
 {
     // UC-01 step 3 (Phase 3): occupancy events from the bus (D2) to the immutable log in MongoDB (D3).
     // Settings: Messaging:Consumers:occupancy-log (see RedisStreamConsumerOptions and ADR-0006).
@@ -88,7 +114,10 @@ if (!rebuildOnly)
             options.Stream = ConfigurationEventMessage.Topic;
             options.Group = AvailabilityConsumers.Configuration; // own name: own metrics (review of Phase 4, finding 6)
         });
+}
 
+if (!rebuildOnly)
+{
     // Outbox relay (UC-02, RF-06, Phase 5, ADR-0009): PostgreSQL outbox → bus (D2), FOR UPDATE SKIP LOCKED so that
     // several Workers instances can run it. Settings: Outbox (Enabled, BatchSize, PollInterval, ...).
     var outbox = builder.Configuration.GetSection(OutboxRelayOptions.SectionName).Get<OutboxRelayOptions>() ?? new();

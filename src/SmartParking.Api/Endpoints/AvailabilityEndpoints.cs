@@ -5,8 +5,8 @@ using SmartParking.Domain.Facilities;
 namespace SmartParking.Api.Endpoints;
 
 /// <summary>
-/// UC-03 — availability by proximity (RF-03). Reads only the Redis read model (GEO + hashes, ADR-0008), never
-/// PostgreSQL: the CQRS query side of the hybrid architecture. Target p95 &lt; 200 ms (RNF-01), measured in Phase 9.
+/// UC-03 — availability by proximity (RF-03), through IAvailabilityQueries. Hybrid: reads only the Redis read model (GEO +
+/// hashes, ADR-0008), never PostgreSQL. Monolithic: one PostGIS query (ADR-0012). Target p95 &lt; 200 ms (RNF-01), Phase 9.
 /// </summary>
 internal static class AvailabilityEndpoints
 {
