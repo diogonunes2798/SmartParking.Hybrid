@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\..\tools\SensorSimulator\SensorSimulator.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The versioned scenarios are tested too: each must load and validate. -->
+    <None Include="..\..\bench\scenarios\*.json" LinkBase="scenarios" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

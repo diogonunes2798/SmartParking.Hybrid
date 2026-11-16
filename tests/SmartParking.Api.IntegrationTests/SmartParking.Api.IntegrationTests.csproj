@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="..\..\src\SmartParking.Api\SmartParking.Api.csproj" />
+    <!-- Phase 7: the UC-05 test drives the API with the simulator itself. -->
+    <ProjectReference Include="..\..\tools\SensorSimulator\SensorSimulator.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
