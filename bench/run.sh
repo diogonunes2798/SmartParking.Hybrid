@@ -63,22 +63,12 @@ ROOT_NATIVE="$(pwd -W 2> /dev/null || pwd)"
 DEFINITION="bench/scenarios/$SCENARIO.sh"
 [[ -f "$DEFINITION" ]] || { echo "no scenario definition $DEFINITION" >&2; exit 2; }
 
-if [[ -n "$(git status --porcelain)" && $ALLOW_DIRTY -eq 0 ]]; then
+# results/ is left out: the CSV of an earlier session, not yet committed, does not change the code being measured.
+if [[ -n "$(git status --porcelain -- . ':!results')" && $ALLOW_DIRTY -eq 0 ]]; then
   echo "uncommitted changes: commit them or pass --allow-dirty (they are recorded in meta.json)" >&2
-  git status --short >&2
+  git status --short -- . ':!results' >&2
   exit 2
 fi
-
-STAMP="$(date +%Y-%m-%d_%H%M)"
-OUT_DIR="results/$SCENARIO"
-CSV="$OUT_DIR/$STAMP.csv"
-META="$OUT_DIR/$STAMP.meta.json"
-LOGS="$OUT_DIR/$STAMP.logs"
-if [[ -e "$CSV" || -e "$META" ]]; then
-  echo "$CSV already exists (one session per minute): wait a minute and run again" >&2
-  exit 2
-fi
-mkdir -p "$OUT_DIR" "$LOGS"
 
 API=http://localhost:5080
 WORKERS=http://localhost:5090
@@ -87,12 +77,48 @@ BUILD=bin/Release/net10.0
 GIT_SHORT="$(git rev-parse --short HEAD)"
 PY=python
 
+# A process left on 5080/5090 (an aborted session, a `dotnet run`) would answer /health/ready in place of the one
+# started here, possibly in the other mode or from an older build, and be measured silently (review of Phase 9a, #4).
+ports_free() {
+  local url code
+  for url in "$API" "$WORKERS"; do
+    code=0
+    curl -s -o /dev/null --max-time 2 "$url/" || code=$?
+    if [[ $code -ne 7 ]]; then
+      echo "something is already listening on $url: stop it before measuring" >&2
+      return 1
+    fi
+  done
+}
+ports_free || exit 2
+
+STAMP="$(date +%Y-%m-%d_%H%M)"
+OUT_DIR="results/$SCENARIO"
+# Rows go to <stamp>.csv.partial and the file is renamed to <stamp>.csv only when every run finished; a failed session
+# leaves <stamp>.failed.csv, so an incomplete file never looks complete (review of Phase 9a, #6).
+CSV_FINAL="$OUT_DIR/$STAMP.csv"
+CSV="$CSV_FINAL.partial"
+META="$OUT_DIR/$STAMP.meta.json"
+LOGS="$OUT_DIR/$STAMP.logs"
+if [[ -e "$CSV_FINAL" || -e "$CSV" || -e "$META" ]]; then
+  echo "$CSV_FINAL already exists (one session per minute): wait a minute and run again" >&2
+  exit 2
+fi
+mkdir -p "$OUT_DIR" "$LOGS"
+
+# Npgsql pool of each process, as configured in the versioned appsettings.Benchmark.json (recorded in every CSV row).
+pool_of() { grep -o 'Maximum Pool Size=[0-9]*' "$1/appsettings.Benchmark.json" | head -1 | cut -d= -f2; }
+POOL="api=$(pool_of src/SmartParking.Api)/workers=$(pool_of src/SmartParking.Workers)"
+
 log() { printf '[bench %s] %s\n' "$(date +%H:%M:%S)" "$*"; }
+now_ms() { date +%H:%M:%S.%3N; }
 
 python_meta() { "$PY" bench/lib/write_meta.py "$@" < /dev/null; }
 
+COMMAND="./bench/run.sh $SCENARIO --variant $VARIANT --runs $RUNS --warmup $WARMUP_SECONDS"
+(( ALLOW_DIRTY )) && COMMAND="$COMMAND --allow-dirty"
 python_meta start --out "$META" --scenario "$SCENARIO" --variant "$VARIANT" --runs "$RUNS" \
-  --warmup "$WARMUP_SECONDS" --command "./bench/run.sh $SCENARIO --variant $VARIANT --runs $RUNS --warmup $WARMUP_SECONDS"
+  --warmup "$WARMUP_SECONDS" --command "$COMMAND"
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Processes. Started from the Release DLLs (not `dotnet run`), so that the PID is the process itself; stopped with
@@ -125,25 +151,40 @@ stop_services() {
   WORKERS_PID=""
 }
 
+# On any exit: stops the API and the Workers, the background jobs (a `docker compose run` client of k6) and any k6
+# container they left (review of Phase 9a, #9). A failed session keeps its rows as <stamp>.failed.csv.
 cleanup() {
-  local code=$?
+  local code=$? job
   stop_services
+  for job in $(jobs -p); do
+    kill "$job" 2> /dev/null || true
+  done
+  docker ps -q --filter label=com.docker.compose.project=smartparking-hybrid \
+    --filter label=com.docker.compose.service=k6 | xargs -r docker rm -f > /dev/null 2>&1 || true
   if [[ $code -ne 0 ]]; then
+    [[ -f "$CSV" ]] && mv "$CSV" "$OUT_DIR/$STAMP.failed.csv"
     python_meta finish --out "$META" --status "failed (exit $code)" || true
     log "failed with exit code $code; see $LOGS"
   fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT TERM
 
-wait_ready() { # <url> <seconds>
-  local url="$1" deadline=$((SECONDS + $2))
+wait_ready() { # <url> <seconds> <pid>
+  local url="$1" deadline=$((SECONDS + $2)) pid="$3"
   until curl -fs -o /dev/null "$url/health/ready"; do
+    if ! kill -0 "$pid" 2> /dev/null; then
+      echo "the process for $url exited before it was ready (see $LOGS)" >&2
+      return 1
+    fi
     if (( SECONDS >= deadline )); then
       echo "$url/health/ready not ready after $2 s" >&2
       return 1
     fi
     sleep 1
   done
+  # Ready, and still ours: the answer did not come from another process on the same port.
+  kill -0 "$pid" 2> /dev/null || { echo "the process for $url is not running" >&2; return 1; }
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -191,8 +232,15 @@ e2e_collect() {
     --variant "$VARIANT" --run "$RUN" --config "$3" < /dev/null
 }
 
-# Records one value of this run in meta.json (exit codes, durations).
+# Records one value of this run in meta.json (exit codes, durations, start times).
 run_meta() { python_meta run --out "$META" --run "$RUN" --key "$1" --value "$2"; }
+
+# Writes one row of this run to the CSV, e.g. a tool's exit code, so that a run whose load was not clean (simulator
+# exit 1 or 4, k6 exit 99) is visible in the CSV itself and not only in meta.json (review of Phase 9a, #6).
+csv_row() { # <metric> <value> <unit> <configuration>
+  "$PY" bench/lib/csv_row.py --csv "$CSV" --scenario "$SCENARIO" --variant "$VARIANT" --run "$RUN" \
+    --metric "$1" --value "$2" --unit "$3" --config "$4" < /dev/null
+}
 
 # Base data of scenario D8 (step 3): provisioning only. The simulator needs a positive rate and duration, so it runs
 # for 1 s at a rate low enough that it sends no event in practice; it ends with every spot free (--free-at-end).
@@ -206,7 +254,7 @@ source "$DEFINITION"
 declare -F scenario_run > /dev/null && declare -F scenario_warmup > /dev/null && declare -F scenario_config > /dev/null \
   || { echo "$DEFINITION must define scenario_config, scenario_warmup and scenario_run" >&2; exit 2; }
 declare -F scenario_seed > /dev/null || scenario_seed() { seed_d8; }
-CONFIG_BASE="variant=$VARIANT;mode=$MODE;warmup=${WARMUP_SECONDS}s;commit=$GIT_SHORT;$(scenario_config)"
+CONFIG_BASE="variant=$VARIANT;mode=$MODE;warmup=${WARMUP_SECONDS}s;commit=$GIT_SHORT;pool=$POOL;$(scenario_config)"
 
 # ---------------------------------------------------------------------------------------------------------------------
 log "scenario $SCENARIO, variant $VARIANT, $RUNS run(s), warm-up ${WARMUP_SECONDS} s -> $CSV"
@@ -225,12 +273,13 @@ for ((RUN = 1; RUN <= RUNS; RUN++)); do
   ASPNETCORE_ENVIRONMENT=Benchmark dotnet ef database update --configuration Release --no-build \
     --project src/SmartParking.Infrastructure.Relational --startup-project src/SmartParking.Api \
     > "$LOGS/migrations.run$RUN.log" 2>&1 < /dev/null
+  ports_free
   start_process api src/SmartParking.Api SmartParking.Api.dll "$API"
   API_PID=$LAST_PID
   start_process workers src/SmartParking.Workers SmartParking.Workers.dll "$WORKERS"
   WORKERS_PID=$LAST_PID
-  wait_ready "$API" 120
-  wait_ready "$WORKERS" 120
+  wait_ready "$API" 120 "$API_PID"
+  wait_ready "$WORKERS" 120 "$WORKERS_PID"
 
   log "run $RUN/$RUNS: base data (D8)"
   started=$SECONDS
@@ -249,5 +298,6 @@ for ((RUN = 1; RUN <= RUNS; RUN++)); do
   log "run $RUN/$RUNS: done"
 done
 
+mv "$CSV" "$CSV_FINAL"
 python_meta finish --out "$META" --status ok
-log "finished: $CSV"
+log "finished: $CSV_FINAL"

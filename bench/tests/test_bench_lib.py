@@ -156,5 +156,40 @@ class E2eLatencyTests(unittest.TestCase):
         self.assertEqual(e2e_latency.rows_from_window(e2e_latency.parse("")), [])
 
 
+class MetaTests(unittest.TestCase):
+    def test_environment_keeps_overrides_and_hides_credentials(self):
+        import write_meta
+        saved = dict(os.environ)
+        try:
+            os.environ["Persistence__Mode"] = "Monolithic"
+            os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://localhost:4317"
+            os.environ["ConnectionStrings__Postgres"] = "Host=x;Password=secret"
+            os.environ["UNRELATED_VARIABLE"] = "x"
+            # Windows upper-cases the names in os.environ (and .NET configuration ignores case), so compare upper-cased.
+            env = {k.upper(): v for k, v in write_meta.relevant_environment().items()}
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+        self.assertEqual(env["PERSISTENCE__MODE"], "Monolithic")
+        self.assertEqual(env["OTEL_EXPORTER_OTLP_ENDPOINT"], "http://localhost:4317")
+        self.assertEqual(env["CONNECTIONSTRINGS__POSTGRES"], "<set>")
+        self.assertNotIn("UNRELATED_VARIABLE", env)
+
+
+class CsvRowTests(unittest.TestCase):
+    def test_one_row_with_section6_columns(self):
+        import csv_row
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "r.csv")
+            csv_row.main(["--csv", path, "--scenario", "smoke", "--variant", "monolithic", "--run", "2",
+                          "--metric", "sim_exit_code", "--value", "4", "--unit", "code", "--config", "c=1"])
+            with open(path, newline="", encoding="utf-8") as f:
+                rows = list(csv.reader(f))
+            self.assertEqual(rows, [benchcsv.HEADER, ["smoke", "monolithic", "sim_exit_code", "4", "code", "2", "c=1"]])
+        finally:
+            shutil.rmtree(d)
+
+
 if __name__ == "__main__":
     unittest.main()

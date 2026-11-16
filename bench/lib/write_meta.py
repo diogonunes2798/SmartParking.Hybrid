@@ -62,6 +62,22 @@ def memory_bytes():
         return None
 
 
+ENV_PREFIXES = ("ASPNETCORE_", "DOTNET_", "OTEL_", "SMOKE_", "BENCH_")
+SECRET_MARKERS = ("CONNECTIONSTRINGS", "PASSWORD", "SECRET", "TOKEN", "KEY")
+
+
+def relevant_environment():
+    """Inherited variables that reach the API, the Workers or a scenario and change their behaviour (review of Phase
+    9a, #7): ASPNETCORE_*, DOTNET_*, OTEL_*, the scenario overrides (SMOKE_*, BENCH_*) and any configuration override
+    (a name with "__", e.g. Persistence__Mode). Values that may hold credentials are recorded only as "<set>"."""
+    found = {}
+    for key, value in os.environ.items():
+        if key.upper().startswith(ENV_PREFIXES) or "__" in key:
+            secret = any(m in key.upper() for m in SECRET_MARKERS)
+            found[key] = "<set>" if secret else value
+    return dict(sorted(found.items()))
+
+
 def now():
     return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -98,7 +114,7 @@ def main(argv=None):
     a = p.parse_args(argv)
 
     if a.cmd == "start":
-        status = sh("git", "status", "--porcelain")
+        status = sh("git", "status", "--porcelain", "--", ".", ":!results")
         meta = {
             "scenario": a.scenario,
             "variant": a.variant,
@@ -110,7 +126,11 @@ def main(argv=None):
                 "commit": sh("git", "rev-parse", "HEAD"),
                 "branch": sh("git", "rev-parse", "--abbrev-ref", "HEAD"),
                 "uncommitted_changes": status.splitlines() if status else [],
+                # With --allow-dirty the file names alone do not say what was measured (review of Phase 9a, #7).
+                # Untracked files are listed above but are not in the patch.
+                "uncommitted_diff": sh("git", "diff", "HEAD", "--", ".", ":!results") if status else "",
             },
+            "environment": relevant_environment(),
             "images": compose_images(),
             "tools": {
                 "dotnet_sdk": sh("dotnet", "--version"),
