@@ -1281,7 +1281,7 @@ Cenário `schema-evolution-pilot` com `--run 5 --free-at-end false`, sem outra c
 
 ## 16-11-2026 — Fase 8: variante monolítica (§7, Cap. 6.5)
 
-Objetivo: a mesma API a correr só com PostgreSQL, para a comparação da secção 6.5, numa baseline bem feita e não propositadamente fraca. Ramo previsto: `phase-8-monolithic` (os commits esperam pela verificação do Diogo).
+Objetivo: a mesma API a correr só com PostgreSQL, para a comparação da secção 6.5, numa baseline bem feita e não propositadamente fraca. Ramo `phase-8-monolithic`, PR #9.
 
 ### Plano e decisões (antes do código)
 
