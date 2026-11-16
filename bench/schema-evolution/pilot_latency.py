@@ -56,6 +56,9 @@ def main():
     p.add_argument("--scenario", default="schema-evolution-pilot")
     p.add_argument("--out", required=True)
     p.add_argument("--config", default="bench/scenarios/schema-evolution-pilot.json")
+    # Phase 8: the monolithic variant records the histogram in the API (synchronous write), not in the Workers;
+    # use --variant monolithic --metrics http://localhost:5080/metrics.
+    p.add_argument("--variant", default="hybrid", choices=["hybrid", "monolithic"])
     a = p.parse_args()
 
     base = scrape(a.metrics)
@@ -89,7 +92,7 @@ def main():
         w = csv.writer(f, lineterminator="\n")
         if new:
             w.writerow(HEADER)
-        row = lambda metric, value, unit: w.writerow([a.scenario, "hybrid", metric, value, unit, a.run, a.config])
+        row = lambda metric, value, unit: w.writerow([a.scenario, a.variant, metric, value, unit, a.run, a.config])
         for i, b in enumerate(boundaries):
             row(f"cut_{['ramp_start', 'ramp_end', 'run_end'][i]}", round(snaps[i + 1][0], 2), "s after t0")
         for name, (_, start), (_, stop) in phases:
