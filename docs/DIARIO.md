@@ -836,8 +836,26 @@ Todas as mutações foram repostas a partir de cópias e não com `git checkout`
   - `GET /api/availability?lat=40.20&lon=-8.41&radius=500`: o parque novo aparece com `spots 1` e `free 0`, **sem reconstrução** (na Fase 4 era preciso o `rebuild-read-model`).
 
   São amostras isoladas e locais, sem valor estatístico. A D7 e a janela medem-se na Fase 9.
-- **Teste manual do Diogo (passo 4 do guião):** por fazer. Fechar uma sessão no Swagger, repetir a consulta à outbox da Fase 2b (`processed_at` preenchido em poucos segundos) e correr `curl http://localhost:5090/metrics | grep -i -E "consistency|e2e|latency"`. A porta é a dos **Workers** (5090), onde estão o *relay* e os projetores. O `/metrics` da API (5080) não tem a janela nem a E2E: só os alvos, a latência HTTP e as métricas de ingestão.
+- **Teste manual (passo 4 do guião):** feito a 16-11-2026, ver o ponto «Resultado» abaixo. Fechar uma sessão no Swagger, repetir a consulta à outbox da Fase 2b (`processed_at` preenchido em poucos segundos) e correr `curl http://localhost:5090/metrics | grep -i -E "consistency|e2e|latency"`. A porta é a dos **Workers** (5090), onde estão o *relay* e os projetores. O `/metrics` da API (5080) não tem a janela nem a E2E: só os alvos, a latência HTTP e as métricas de ingestão.
   - **Primeira tentativa falhou (16-11-2026).** O comando do guião é para bash e o terminal é o Windows PowerShell 5.1: não existe `grep`, e `curl` é um alias de `Invoke-WebRequest`. Além disso, nem a API nem os Workers estavam a correr, porque foram parados no fim do meu ensaio. **Pré-condição:** os dois processos arrancados (`dotnet run --project src/SmartParking.Api` e `dotnet run --project src/SmartParking.Workers`, em dois terminais). Equivalente em PowerShell: `(Invoke-WebRequest -UseBasicParsing http://localhost:5090/metrics).Content -split "`n" | Select-String 'consistency|e2e|latency'`, ou `curl.exe -s http://localhost:5090/metrics | findstr /I "consistency e2e latency"`.
+  - **Primeira tentativa: registo recusado.** Pediram-me para registar o teste no diário, mas no estado real não havia nenhum `SessionClosed` novo na outbox, e o `/metrics` dos Workers, já arrancados, não tinha amostras. Não registei nenhum resultado e pedi os valores. O Diogo pediu então ao Claude Code que fizesse o teste.
+  - **Resultado** (feito pelo Claude Code, a pedido do Diogo, com a API e os Workers arrancados pelo Diogo; por HTTP, com um script, e não pela interface do Swagger, mas com os mesmos *endpoints* e corpos):
+    - `POST /api/users` → 201; `POST /api/users/{id}/vehicles` → 201; `POST /api/sessions` (lugar da zona Centro) → **201** `Open`; 3 s depois, `POST /api/sessions/{id}/close` com `{}` → **200** `Closed`, `cost 0.02`; `POST /api/sessions/{id}/pay` com `{"method":"Card"}` → **201** `Completed` (sessão `01a1e3bb-9407-7e65-8f8d-99c40dc8efb2`).
+    - A consulta à outbox da Fase 2b, 0,5 s depois do fecho, já mostrava `processed_at` preenchido em todas as linhas:
+
+      | Evento | `processed_at − occurred_at` | `trace_parent` |
+      |---|---|---|
+      | `SessionStarted` | 0,204 s | preenchido |
+      | `SessionClosed` | 0,056 s | preenchido |
+      | `PaymentRegistered` | 0,050 s | preenchido |
+
+    - `XLEN smartparking:domain-events` = 6: estes 3 eventos e os 3 da sessão da Fase 2b, publicados no primeiro arranque do *relay*.
+    - **Com o padrão exato do guião** (`consistency|e2e|latency`, versão PowerShell), depois do fecho da sessão só apareceu `smartparking_target_seconds{objective="uc01_ingestion_e2e_p95"} 1`. É o esperado: os eventos de sessão ainda não têm consumidor no *read model* (Fase 6), por isso medem-se em `smartparking_outbox_publish_lag_seconds` (contagem 1 por tipo, somas 0,204 s, 0,056 s e 0,050 s).
+    - Para completar o teste, criei um lugar no parque «Ensaio Fase 5» (`POST /api/facilities/{id}/spots`) e enviei um evento `OCCUPIED` para esse lugar (`202`). O mesmo comando PowerShell passou a mostrar:
+      - `smartparking_consistency_window_seconds_count{type="SpotChanged"} 1`, com soma 0,139 s;
+      - `smartparking_ingestion_e2e_latency_seconds_count 1`, com soma 0,356 s;
+      - o alvo D7, `smartparking_target_seconds` 1.
+    - São amostras únicas, em local e sem carga, sem valor estatístico.
 
 ### Revisões independentes (passo 6)
 
