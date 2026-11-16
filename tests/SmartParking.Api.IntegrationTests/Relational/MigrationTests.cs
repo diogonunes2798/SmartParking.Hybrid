@@ -16,6 +16,8 @@ public sealed class MigrationTests(RelationalFixture fixture)
         "payments", "sensors", "tariffs", "users", "vehicles",
     ];
 
+    private static readonly string[] ExpectedAnalyticsTables = ["aggregation_checkpoints", "occupancy_hourly"];
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>
@@ -41,10 +43,14 @@ public sealed class MigrationTests(RelationalFixture fixture)
 
             Assert.Equal(db.Database.GetMigrations(), await db.Database.GetAppliedMigrationsAsync(Ct));
             Assert.Equivalent(ExpectedTables, await PublicTablesAsync(db), strict: true);
+            Assert.Equivalent(ExpectedAnalyticsTables, await AnalyticsTablesAsync(db), strict: true);
 
             await db.GetService<IMigrator>().MigrateAsync(Migration.InitialDatabase, cancellationToken: Ct);
 
             Assert.Equal(["__ef_migrations_history"], await PublicTablesAsync(db));
+            Assert.Empty(await db.Database
+                .SqlQueryRaw<string>("SELECT schema_name AS \"Value\" FROM information_schema.schemata WHERE schema_name = 'analytics'")
+                .ToListAsync(Ct));
         }
         finally
         {
@@ -67,10 +73,30 @@ public sealed class MigrationTests(RelationalFixture fixture)
         var tables = await fixture.WithDbAsync(PublicTablesAsync);
 
         Assert.Equivalent(ExpectedTables, tables, strict: true);
+        Assert.Equivalent(ExpectedAnalyticsTables, await fixture.WithDbAsync(AnalyticsTablesAsync), strict: true);
     }
 
-    private static Task<List<string>> PublicTablesAsync(SmartParkingDbContext db) =>
+    /// <summary>
+    /// UC-04 (D4, ADR-0010): the summary tables live in their own schema and have no foreign key to any operational table.
+    /// </summary>
+    [Fact]
+    public async Task Analytics_tables_have_no_foreign_keys()
+    {
+        var foreignKeys = await fixture.WithDbAsync(db => db.Database
+            .SqlQueryRaw<string>(
+                "SELECT constraint_name AS \"Value\" FROM information_schema.table_constraints " +
+                "WHERE table_schema = 'analytics' AND constraint_type = 'FOREIGN KEY'")
+            .ToListAsync(Ct));
+
+        Assert.Empty(foreignKeys);
+    }
+
+    private static Task<List<string>> PublicTablesAsync(SmartParkingDbContext db) => TablesAsync(db, "public");
+
+    private static Task<List<string>> AnalyticsTablesAsync(SmartParkingDbContext db) => TablesAsync(db, "analytics");
+
+    private static Task<List<string>> TablesAsync(SmartParkingDbContext db, string schema) =>
         db.Database
-            .SqlQueryRaw<string>("SELECT table_name AS \"Value\" FROM information_schema.tables WHERE table_schema = 'public'")
+            .SqlQuery<string>($"SELECT table_name AS \"Value\" FROM information_schema.tables WHERE table_schema = {schema}")
             .ToListAsync(Ct);
 }
