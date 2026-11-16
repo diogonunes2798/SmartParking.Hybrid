@@ -1,16 +1,22 @@
 """UC-05 pilot (Phase 7, step 5): D7 latency before, during and after the generation-2 ramp.
 
-Scrapes the end-to-end latency histogram (smartparking_ingestion_e2e_latency_seconds, Workers /metrics) every
---interval seconds while the simulator runs. The run starts (t0) at the first scrape where the count grows; the
-phases are cut from t0 using the scenario times (ramp from --ramp-start for --ramp-duration, run of --duration).
-Percentiles are upper bucket bounds (Prometheus histogram), so they are coarse: a pilot, not the Phase 9 measurement.
+Reads the end-to-end latency histogram (smartparking_ingestion_e2e_latency_seconds, Workers /metrics) at the
+phase boundaries themselves: t0 (first growth of the count, polled every 0.2 s), t0 + ramp start, t0 + ramp end
+and t0 + duration + drain. The first version sampled every 15 s and took the last sample before each boundary,
+which shifted the phases by about 15 s (Phase 7 code review, M2); the boundaries are now scheduled reads.
 
-Usage (with the simulator started right after):
-  python bench/schema-evolution/pilot_latency.py --out results/schema-evolution-pilot/<date>.csv
+t0 is the first event processed, a fraction of a second after the simulator's first event; the reported
+boundaries ("cut_*" rows) say where each phase really started. Percentiles are upper bucket bounds (Prometheus
+histogram), so they are coarse: a pilot, not the Phase 9 measurement.
+
+Rows are appended to --out (spec §6 format; header only for a new file), so the simulator's own summary
+(--summary-csv) can go to the same file. Usage, started just before the simulator:
+  python bench/schema-evolution/pilot_latency.py --out results/schema-evolution-pilot/<yyyy-MM-dd_HHmm>.csv --run 2
 """
 import argparse, csv, os, re, time, urllib.request
 
 LINE = re.compile(r'^smartparking_ingestion_e2e_latency_seconds_bucket\{[^}]*le="([^"]+)"\} (\S+)$')
+HEADER = ["cenario", "variante", "metrica", "valor", "unidade", "execucao", "configuracao"]
 
 
 def scrape(url):
@@ -41,11 +47,13 @@ def quantile(delta, q):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--metrics", default="http://localhost:5090/metrics")
-    p.add_argument("--interval", type=float, default=15)
     p.add_argument("--duration", type=float, default=600)
     p.add_argument("--ramp-start", type=float, default=300)
     p.add_argument("--ramp-duration", type=float, default=60)
+    p.add_argument("--drain", type=float, default=30, help="seconds after the run for closing events and the pipeline")
     p.add_argument("--wait-start", type=float, default=900, help="max seconds to wait for the run to start")
+    p.add_argument("--run", type=int, default=1)
+    p.add_argument("--scenario", default="schema-evolution-pilot")
     p.add_argument("--out", required=True)
     p.add_argument("--config", default="bench/scenarios/schema-evolution-pilot.json")
     a = p.parse_args()
@@ -54,48 +62,44 @@ def main():
     base_count = base.get(float("inf"), 0)
     deadline = time.time() + a.wait_start
     while True:
-        time.sleep(1)
+        time.sleep(0.2)
         snap = scrape(a.metrics)
         if snap.get(float("inf"), 0) > base_count:
-            t0 = time.time() - 0.5
+            t0 = time.time()
             break
         if time.time() > deadline:
             raise SystemExit("run never started")
-    print(f"run started; scraping every {a.interval} s", flush=True)
+    print("run started", flush=True)
 
+    boundaries = [a.ramp_start, a.ramp_start + a.ramp_duration, a.duration + a.drain]
     snaps = [(0.0, base)]
-    end = t0 + a.duration + 30  # closing FREED events and drain
-    while time.time() < end:
-        time.sleep(a.interval)
+    for b in boundaries:
+        wait = t0 + b - time.time()
+        if wait > 0:
+            time.sleep(wait)
         snaps.append((time.time() - t0, scrape(a.metrics)))
+        print(f"read at t0 + {snaps[-1][0]:.2f} s (target {b} s)", flush=True)
 
-    def at(t):  # last snapshot not after t (first one for t = 0)
-        best = snaps[0][1]
-        for ts, s in snaps:
-            if ts <= t:
-                best = s
-        return best
+    names = ["before_ramp", "ramp", "after_ramp"]
+    phases = [(names[i], snaps[i], snaps[i + 1]) for i in range(3)] + [("whole_run", snaps[0], snaps[3])]
 
-    phases = [
-        ("before_ramp", 0, a.ramp_start),
-        ("ramp", a.ramp_start, a.ramp_start + a.ramp_duration),
-        ("after_ramp", a.ramp_start + a.ramp_duration, a.duration + 30),
-        ("whole_run", 0, a.duration + 30),
-    ]
-    os.makedirs(os.path.dirname(a.out), exist_ok=True)
-    with open(a.out, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["cenario", "variante", "metrica", "valor", "unidade", "execucao", "configuracao"])
-        for name, start, stop in phases:
-            d = diff(at(start), at(stop))
-            n = d.get(float("inf"), 0)
+    new = not os.path.exists(a.out) or os.path.getsize(a.out) == 0
+    os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
+    with open(a.out, "a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f, lineterminator="\n")
+        if new:
+            w.writerow(HEADER)
+        row = lambda metric, value, unit: w.writerow([a.scenario, "hybrid", metric, value, unit, a.run, a.config])
+        for i, b in enumerate(boundaries):
+            row(f"cut_{['ramp_start', 'ramp_end', 'run_end'][i]}", round(snaps[i + 1][0], 2), "s after t0")
+        for name, (_, start), (_, stop) in phases:
+            d = diff(start, stop)
             for label, q in (("p50", 0.5), ("p95", 0.95), ("p99", 0.99)):
                 v = quantile(d, q)
-                w.writerow(["schema-evolution-pilot", "hybrid", f"e2e_latency_{label}_{name}",
-                            "" if v is None else v, "s (bucket upper bound)", 1, a.config])
+                row(f"e2e_latency_{label}_{name}", "" if v is None else v, "s (bucket upper bound)")
                 print(f"{name:12} {label} <= {v} s", flush=True)
-            w.writerow(["schema-evolution-pilot", "hybrid", f"e2e_latency_count_{name}", int(n), "events", 1, a.config])
-            print(f"{name:12} n = {int(n)}", flush=True)
+            row(f"e2e_latency_count_{name}", int(d.get(float("inf"), 0)), "events")
+            print(f"{name:12} n = {int(d.get(float('inf'), 0))}", flush=True)
 
 
 if __name__ == "__main__":
