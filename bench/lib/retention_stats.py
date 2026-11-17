@@ -17,7 +17,11 @@ Storage (the stats of the guide, step 2):
 
 CPU: usage_usec of the cgroup of each compose container (cpu.stat, cgroup v2), and the CPU time of the API and Workers
 processes on the host (Get-Process). cpu-diff writes cpu_<phase>_<name>_seconds, cpu_<phase>_total_seconds and, with
---events > 0, cpu_<phase>_total_seconds_per_1e6_events.
+--events > 0, cpu_<phase>_total_seconds_per_1e6_events. --only limits the components (the monolithic variant does not
+use mongo and redis, which still run and would add their idle CPU). With --idle-before/--idle-after/--idle-seconds and
+--seconds it also writes the net CPU: delta - (idle rate x window length), per component, as cpu_<phase>_<name>_net_seconds,
+cpu_<phase>_total_net_seconds and _per_1e6_events (review of Phase 10, measurement finding 13: the windows have different
+lengths, and idle CPU includes the compose healthchecks, mongosh every 5 s in the mongo container).
 """
 import argparse
 import json
@@ -33,6 +37,7 @@ MONGO_USER = os.environ.get("MONGO_USER", "smartparking")
 MONGO_PASSWORD = os.environ.get("MONGO_PASSWORD", "smartparking")
 PG_USER = os.environ.get("POSTGRES_USER", "smartparking")
 PG_DB = os.environ.get("POSTGRES_DB", "smartparking")
+PG_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "smartparking")
 
 # fsync first: WiredTiger updates the sizes of collStats at a checkpoint (about every 60 s); without it, a reading just
 # after the load or the TTL deletes showed the sizes of the previous checkpoint (pilot of 17-11-2026, 09:49).
@@ -85,6 +90,8 @@ def hybrid_storage_rows(phase, stats):
         (f"{p}_free_bytes", stats.get("freeStorageSize", 0), "bytes"),
         (f"{p}_index_bytes", stats["totalIndexSize"], "bytes"),
         (f"{p}_total_bytes", stats["storageSize"] + stats["totalIndexSize"], "bytes"),
+        # Space the collection really holds: WiredTiger reuses the free blocks for new inserts (finding 14).
+        (f"{p}_used_bytes", stats["storageSize"] - stats.get("freeStorageSize", 0) + stats["totalIndexSize"], "bytes"),
     ]
     for name, size in sorted((stats.get("indexSizes") or {}).items()):
         rows.append((f"{p}_index_{name}_bytes", size, "bytes"))
@@ -98,6 +105,7 @@ def monolithic_storage_rows(phase, stats):
         (f"{p}_storage_bytes", stats["table_bytes"], "bytes"),
         (f"{p}_index_bytes", stats["index_bytes"], "bytes"),
         (f"{p}_total_bytes", stats["table_bytes"] + stats["index_bytes"], "bytes"),
+        (f"{p}_used_bytes", stats["table_bytes"] + stats["index_bytes"], "bytes"),
         (f"{p}_partitions", stats["partitions"], "partitions"),
     ]
 
@@ -117,15 +125,30 @@ def process_cpu_seconds(windows_pid):
     return float(out.strip())
 
 
-def cpu_diff_rows(phase, before, after, events):
-    rows, total = [], 0.0
-    for name in sorted(set(before) & set(after)):
+def cpu_diff_rows(phase, before, after, events, only=None, idle=None, seconds=None):
+    """idle: (before, after, seconds) of the idle window, for the net rows (needs seconds, the length of this window)."""
+    names = sorted(set(before) & set(after))
+    if only:
+        names = [n for n in names if n in only]
+    rows, total, net_total = [], 0.0, 0.0
+    net = idle is not None and seconds
+    for name in names:
         delta = after[name] - before[name]
         total += delta
         rows.append((f"cpu_{phase}_{name}_seconds", delta, "s"))
+        if net:
+            idle_before, idle_after, idle_seconds = idle
+            rate = (idle_after[name] - idle_before[name]) / idle_seconds
+            value = delta - rate * seconds
+            net_total += value
+            rows.append((f"cpu_{phase}_{name}_net_seconds", value, "s"))
     rows.append((f"cpu_{phase}_total_seconds", total, "s"))
+    if net:
+        rows.append((f"cpu_{phase}_total_net_seconds", net_total, "s"))
     if events and events > 0:
         rows.append((f"cpu_{phase}_total_seconds_per_1e6_events", total * 1e6 / events, "s"))
+        if net:
+            rows.append((f"cpu_{phase}_total_net_seconds_per_1e6_events", net_total * 1e6 / events, "s"))
     return rows
 
 
@@ -136,12 +159,21 @@ def archive_rows(path):
 
 
 def count_events(variant, since=None, until=None):
+    """Counted from a client in a container of its own (`docker compose run --rm --no-deps`), not with `exec`: an `exec`
+    runs the client (mongosh is a Node.js process) inside the cgroup of the database container, so polling during a CPU
+    window was measured as database CPU, much more for mongosh than for psql (review of Phase 10, measurement finding 1)."""
     if variant == "hybrid":
         query = "{}" if since is None else (
             f"{{timestamp: {{$gte: ISODate('{since}'), $lt: ISODate('{until}')}}}}")
-        return int(mongo_eval(f"print(db.getSiblingDB('smartparking').occupancy_events.countDocuments({query}))"))
+        uri = f"mongodb://{MONGO_USER}:{MONGO_PASSWORD}@mongo:27017/smartparking?authSource=admin"
+        out = run(["docker", "compose", "run", "--rm", "--no-deps", "-T", "mongo", "mongosh", uri, "--quiet", "--eval",
+                   f"print(db.occupancy_events.countDocuments({query}))"])
+        return int(out.strip().splitlines()[-1])
     where = "" if since is None else f" WHERE \"timestamp\" >= '{since}' AND \"timestamp\" < '{until}'"
-    return int(psql(f"SELECT count(*) FROM monolith.occupancy_events{where}"))
+    out = run(["docker", "compose", "run", "--rm", "--no-deps", "-T", "-e", f"PGPASSWORD={PG_PASSWORD}", "postgres",
+               "psql", "-h", "postgres", "-U", PG_USER, "-d", PG_DB, "-At", "-c",
+               f"SELECT count(*) FROM monolith.occupancy_events{where}"])
+    return int(out.strip().splitlines()[-1])
 
 
 def labels(p):
@@ -160,6 +192,9 @@ def main(argv=None):
     labels(storage)
     storage.add_argument("--phase", required=True)
 
+    clock = sub.add_parser("clock-skew")
+    clock.add_argument("--service", default="mongo")
+
     snap = sub.add_parser("cpu-snapshot")
     snap.add_argument("--out", required=True)
     snap.add_argument("--pid", action="append", default=[], help="name=<windows pid> of a host process")
@@ -170,6 +205,11 @@ def main(argv=None):
     diff.add_argument("--after", required=True)
     diff.add_argument("--phase", required=True)
     diff.add_argument("--events", type=float, default=0)
+    diff.add_argument("--only", help="comma-separated components to include (default: all)")
+    diff.add_argument("--idle-before")
+    diff.add_argument("--idle-after")
+    diff.add_argument("--idle-seconds", type=float)
+    diff.add_argument("--seconds", type=float, help="length of this window, for the net rows")
 
     arch = sub.add_parser("archive")
     labels(arch)
@@ -205,11 +245,27 @@ def main(argv=None):
             before = json.load(f)
         with open(a.after, encoding="utf-8") as f:
             after = json.load(f)
-        append_rows(a.csv, a.scenario, a.variant, a.run, a.config, cpu_diff_rows(a.phase, before, after, a.events))
+        idle = None
+        if a.idle_before and a.idle_after and a.idle_seconds:
+            with open(a.idle_before, encoding="utf-8") as f:
+                idle_before = json.load(f)
+            with open(a.idle_after, encoding="utf-8") as f:
+                idle_after = json.load(f)
+            idle = (idle_before, idle_after, a.idle_seconds)
+        only = set(a.only.split(",")) if a.only else None
+        append_rows(a.csv, a.scenario, a.variant, a.run, a.config,
+                    cpu_diff_rows(a.phase, before, after, a.events, only, idle, a.seconds))
     elif a.command == "archive":
         append_rows(a.csv, a.scenario, a.variant, a.run, a.config, archive_rows(a.path))
     elif a.command == "count":
         print(count_events(a.variant, a.since, a.until))
+    elif a.command == "clock-skew":
+        # Container clock minus host clock, in ms (finding 17: the TTL monitor uses the clock of the Docker VM).
+        import time
+        before = time.time()
+        container = float(run(["docker", "compose", "exec", "-T", a.service, "date", "+%s.%N"]).strip())
+        after = time.time()
+        print(round((container - (before + after) / 2) * 1000))
     return 0
 
 

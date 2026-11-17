@@ -27,6 +27,17 @@ class RetentionStatsTests(unittest.TestCase):
         self.assertEqual(values["cpu_load_total_seconds_per_1e6_events"], 8.0)
         self.assertNotIn("cpu_load_gone_seconds", values)
 
+    def test_cpu_diff_net_subtracts_the_idle_rate_over_the_window_and_only_keeps_the_given_components(self):
+        idle = ({"postgres": 0.0, "mongo": 0.0}, {"postgres": 3.0, "mongo": 30.0}, 30.0)  # 0.1/s and 1/s
+        rows = rs.cpu_diff_rows("retention", {"postgres": 10.0, "mongo": 10.0}, {"postgres": 16.0, "mongo": 90.0},
+                                1_000_000, only={"postgres"}, idle=idle, seconds=20.0)
+        values = {m: v for m, v, _ in rows}
+        self.assertEqual(values["cpu_retention_postgres_seconds"], 6.0)
+        self.assertAlmostEqual(values["cpu_retention_postgres_net_seconds"], 4.0)
+        self.assertAlmostEqual(values["cpu_retention_total_net_seconds"], 4.0)
+        self.assertAlmostEqual(values["cpu_retention_total_net_seconds_per_1e6_events"], 4.0)
+        self.assertNotIn("cpu_retention_mongo_seconds", values)
+
     def test_cpu_diff_without_events_has_no_normalised_row(self):
         rows = rs.cpu_diff_rows("retention", {"mongo": 1.0}, {"mongo": 2.0}, 0)
         self.assertEqual([m for m, _, _ in rows], ["cpu_retention_mongo_seconds", "cpu_retention_total_seconds"])
@@ -37,6 +48,7 @@ class RetentionStatsTests(unittest.TestCase):
         values = {m: v for m, v, _ in rs.hybrid_storage_rows("after_load", stats)}
         self.assertEqual(values["storage_after_load_total_bytes"], 700)
         self.assertEqual(values["storage_after_load_free_bytes"], 50)
+        self.assertEqual(values["storage_after_load_used_bytes"], 650)
         self.assertEqual(values["storage_after_load_index__id__bytes"], 100)
         self.assertEqual(values["storage_after_load_index_ux_eventId_bytes"], 200)
 
