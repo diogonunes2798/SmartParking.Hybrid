@@ -105,8 +105,8 @@ public sealed class AnalyticsReviewFixesTests(AnalyticsFixture fixture)
         var high = new DateTimeOffset(2099, 1, 1, 0, 0, 0, TimeSpan.Zero);
         try
         {
-            Assert.Equal(high, await store.SaveAsync([newer], high, Ct));
-            Assert.Equal(high, await store.SaveAsync([older], high.AddHours(-5), Ct));
+            Assert.Equal(high, await store.SaveAsync([newer], high, null, Ct));
+            Assert.Equal(high, await store.SaveAsync([older], high.AddHours(-5), null, Ct));
             Assert.Equal(high, await store.GetCheckpointAsync(Ct));
         }
         finally

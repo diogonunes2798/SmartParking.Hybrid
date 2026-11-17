@@ -44,7 +44,11 @@ internal sealed class EfOccupancySummaryStore(SmartParkingDbContext context) : I
         return checkpoint?.ToUniversalTime();
     }
 
-    public async Task<DateTimeOffset?> SaveAsync(IReadOnlyList<OccupancyHourlySummary> rows, DateTimeOffset? checkpoint, CancellationToken cancellationToken)
+    public async Task<DateTimeOffset?> SaveAsync(
+        IReadOnlyList<OccupancyHourlySummary> rows,
+        DateTimeOffset? checkpoint,
+        AggregatedRange? covered,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(rows);
         var transaction = await context.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
@@ -74,6 +78,21 @@ internal sealed class EfOccupancySummaryStore(SmartParkingDbContext context) : I
                         $"""
                          INSERT INTO analytics.aggregation_checkpoints (name, position) VALUES ({CheckpointName}, {position.ToUniversalTime()})
                          ON CONFLICT (name) DO UPDATE SET position = GREATEST(aggregation_checkpoints.position, EXCLUDED.position)
+                         """,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (covered is not null)
+            {
+                // Coverage for retention (Phase 10, ADR-0013): every hour of the range, with or without rows.
+                var from = covered.From.ToUniversalTime();
+                var to = covered.To.ToUniversalTime();
+                await context.Database.ExecuteSqlAsync(
+                        $"""
+                         INSERT INTO analytics.aggregated_hours (hour_start, aggregated_at)
+                         SELECT h, now() FROM generate_series({from}, {to} - interval '1 hour', interval '1 hour') AS h
+                         ON CONFLICT (hour_start) DO UPDATE SET aggregated_at = EXCLUDED.aggregated_at
                          """,
                         cancellationToken)
                     .ConfigureAwait(false);

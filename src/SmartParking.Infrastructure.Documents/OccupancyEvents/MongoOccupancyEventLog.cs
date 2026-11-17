@@ -8,7 +8,8 @@ namespace SmartParking.Infrastructure.Documents.OccupancyEvents;
 
 /// <summary>
 /// Immutable occupancy event log in MongoDB (D3 default, ADR-0007). Only <c>insertMany</c> is ever issued: no
-/// update, no replace, no delete (retention is Phase 10). Document shape:
+/// update, no replace, no delete. Old events are removed only by the TTL index, within the limits set by the retention
+/// guard (Phase 10, ADR-0013). Document shape:
 /// <code>
 /// { _id: ObjectId, eventId: UUID, sensorId: UUID, spotId: UUID, facilityId: UUID, type: "OCCUPIED" | "FREED",
 ///   timestamp: Date, payload: { …as received… }, receivedAt: Date, storedAt: Date }
@@ -21,14 +22,28 @@ namespace SmartParking.Infrastructure.Documents.OccupancyEvents;
 /// </list>
 /// Idempotency: a unique index on <c>eventId</c>; duplicates are counted, not failed (at-least-once bus).
 /// </summary>
-public sealed class MongoOccupancyEventLog(IMongoDatabase database, TimeProvider time) : IOccupancyEventLog, IDisposable
+public sealed class MongoOccupancyEventLog(IMongoDatabase database, TimeProvider time, MongoEventLogOptions options)
+    : IOccupancyEventLog, IDisposable
 {
     public const string CollectionName = "occupancy_events";
     public const string EventIdIndexName = "ux_eventId";
     public const string FacilityTimestampIndexName = "ix_facilityId_timestamp";
     public const string FacilitySpotTimestampIndexName = "ix_facilityId_spotId_timestamp_eventId";
 
+    /// <summary>
+    /// TTL index on <c>timestamp</c> (Phase 10, ADR-0013). Created with <see cref="NeverExpireSeconds"/>: nothing expires
+    /// until the retention guard (<see cref="MongoRawEventRetention"/>) lowers it, and only as far as the purge horizon.
+    /// </summary>
+    public const string TimestampTtlIndexName = "ix_timestamp_ttl";
+
+    /// <summary>The largest <c>expireAfterSeconds</c> MongoDB accepts (int32, about 68 years): «never».</summary>
+    public const long NeverExpireSeconds = int.MaxValue;
+
+    /// <summary>The block compressors MongoDB's WiredTiger accepts for a collection.</summary>
+    public static IReadOnlySet<string> BlockCompressors { get; } = new HashSet<string>(StringComparer.Ordinal) { "none", "snappy", "zlib", "zstd" };
+
     private const int DuplicateKeyCode = 11000;
+    private const int IndexOptionsConflictCode = 85;
 
     private readonly IMongoCollection<BsonDocument> collection = database.GetCollection<BsonDocument>(CollectionName);
     private readonly SemaphoreSlim indexLock = new(1, 1);
@@ -212,7 +227,7 @@ public sealed class MongoOccupancyEventLog(IMongoDatabase database, TimeProvider
 
     private static DateTimeOffset Timestamp(BsonValue value) => new(value.ToUniversalTime(), TimeSpan.Zero);
 
-    /// <summary>Creates the three indexes of the log if they do not exist (idempotent on the server).</summary>
+    /// <summary>Creates the collection and the four indexes of the log if they do not exist (idempotent on the server).</summary>
     public async Task EnsureIndexesAsync(CancellationToken cancellationToken)
     {
         if (indexesReady)
@@ -227,6 +242,8 @@ public sealed class MongoOccupancyEventLog(IMongoDatabase database, TimeProvider
             {
                 return;
             }
+
+            await EnsureCollectionAsync(cancellationToken).ConfigureAwait(false);
 
             var keys = Builders<BsonDocument>.IndexKeys;
             CreateIndexModel<BsonDocument>[] models =
@@ -243,11 +260,67 @@ public sealed class MongoOccupancyEventLog(IMongoDatabase database, TimeProvider
                     new CreateIndexOptions { Name = FacilitySpotTimestampIndexName }),
             ];
             await collection.Indexes.CreateManyAsync(models, cancellationToken).ConfigureAwait(false);
+
+            // Retention (Phase 10, ADR-0013): a TTL index must be on a single field. It also serves the archive export
+            // and the oldest-event lookup. A fourth index costs on every insert: measured by the retention scenario.
+            // Created on its own: once the guard has lowered expireAfterSeconds, creating it again with «never» is an
+            // IndexOptionsConflict (85), which means it already exists and must be left as the guard set it.
+            try
+            {
+                await collection.Indexes.CreateOneAsync(
+                        new CreateIndexModel<BsonDocument>(
+                            keys.Ascending("timestamp"),
+                            new CreateIndexOptions { Name = TimestampTtlIndexName, ExpireAfter = TimeSpan.FromSeconds(NeverExpireSeconds) }),
+                        cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (MongoCommandException ex) when (ex.Code == IndexOptionsConflictCode)
+            {
+                // already there, with the value set by the retention guard
+            }
             indexesReady = true;
         }
         finally
         {
             indexLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Creates the collection with the configured block compressor (Phase 10, ADR-0013). WiredTiger fixes the compressor
+    /// when the collection is created, so a different value for an existing collection has no effect (the creation string
+    /// in <c>collStats</c> shows which one is in force). Null keeps the server default (snappy).
+    /// </summary>
+    private async Task EnsureCollectionAsync(CancellationToken cancellationToken)
+    {
+        if (options.BlockCompressor is not { } compressor)
+        {
+            return;
+        }
+
+        var existing = await database
+            .ListCollectionNamesAsync(new ListCollectionNamesOptions { Filter = new BsonDocument("name", CollectionName) }, cancellationToken)
+            .ConfigureAwait(false);
+        if (await existing.AnyAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        try
+        {
+            await database.CreateCollectionAsync(
+                    CollectionName,
+                    new CreateCollectionOptions
+                    {
+                        StorageEngine = new BsonDocument(
+                            "wiredTiger", new BsonDocument("configString", "block_compressor=" + compressor)),
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (MongoCommandException ex) when (ex.Code == 48)
+        {
+            // NamespaceExists: created meanwhile by another process (the first insert or another Workers instance).
         }
     }
 

@@ -11,10 +11,23 @@ namespace SmartParking.Infrastructure.Relational.Monolithic;
 /// </summary>
 public sealed class OccupancyPartitionMaintenance(NpgsqlDataSource dataSource, MonolithicOptions options, TimeProvider time)
 {
-    /// <summary>Creates the partitions from the current UTC month to <see cref="MonolithicOptions.PartitionMonthsAhead"/> months ahead; returns how many were created.</summary>
+    /// <summary>
+    /// Creates the partitions from the current UTC month to <see cref="MonolithicOptions.PartitionMonthsAhead"/> months ahead
+    /// (or the daily ones, with <see cref="PartitionInterval.Day"/>); returns how many were created.
+    /// </summary>
     public async Task<int> EnsureAsync(CancellationToken cancellationToken)
     {
         var now = time.GetUtcNow().UtcDateTime;
+        if (options.PartitionInterval == PartitionInterval.Day)
+        {
+            // Daily partitions (Phase 10, ADR-0013): from PartitionDaysBehind days back to PartitionDaysAhead days ahead.
+            var days = dataSource.CreateCommand($"SELECT {MonolithicSchema.EnsureDayPartitionsFunction}(@from_day, @days)");
+            await using var daysScope = days.ConfigureAwait(false);
+            days.Parameters.AddWithValue("from_day", DateOnly.FromDateTime(now).AddDays(-options.PartitionDaysBehind));
+            days.Parameters.AddWithValue("days", options.PartitionDaysBehind + options.PartitionDaysAhead + 1);
+            return (int)(await days.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+        }
+
         var command = dataSource.CreateCommand($"SELECT {MonolithicSchema.EnsurePartitionsFunction}(@from_month, @months)");
         await using var commandScope = command.ConfigureAwait(false);
         command.Parameters.AddWithValue("from_month", new DateOnly(now.Year, now.Month, 1));

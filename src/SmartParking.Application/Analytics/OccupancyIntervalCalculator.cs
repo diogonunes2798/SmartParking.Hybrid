@@ -127,6 +127,10 @@ public static class OccupancyIntervalCalculator
     public static DateTimeOffset FloorHour(DateTimeOffset value) =>
         new(value.UtcTicks - (value.UtcTicks % Hour.Ticks), TimeSpan.Zero);
 
+    /// <summary>The first whole UTC hour at or after <paramref name="value"/>.</summary>
+    public static DateTimeOffset CeilHour(DateTimeOffset value) =>
+        IsWholeHour(value) ? value.ToUniversalTime() : FloorHour(value) + Hour;
+
     private static void EnsureWholeHour(DateTimeOffset value, string name)
     {
         if (!IsWholeHour(value))

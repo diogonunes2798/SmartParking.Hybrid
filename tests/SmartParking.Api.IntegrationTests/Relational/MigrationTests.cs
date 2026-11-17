@@ -16,7 +16,9 @@ public sealed class MigrationTests(RelationalFixture fixture)
         "payments", "sensors", "tariffs", "users", "vehicles",
     ];
 
-    private static readonly string[] ExpectedAnalyticsTables = ["aggregation_checkpoints", "occupancy_hourly"];
+    // Phase 10 (ADR-0013): coverage, archive manifest, retention positions and the spot state snapshot.
+    private static readonly string[] ExpectedAnalyticsTables =
+        ["aggregated_hours", "aggregation_checkpoints", "occupancy_hourly", "retention_archive", "retention_positions", "spot_state_snapshot"];
 
     private static readonly string[] ExpectedMonolithTables = ["occupancy_events", "spot_state"];
 

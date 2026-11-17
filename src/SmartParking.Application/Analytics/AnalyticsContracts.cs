@@ -46,9 +46,23 @@ public interface IOccupancySummaryStore
     /// Upserts the rows and, if given, moves the checkpoint forward (never back), in one transaction. A row is replaced
     /// only by one aggregated at the same time or later, so a slow instance never overwrites a newer result (review of
     /// Phase 6, finding 11). Returns the checkpoint stored after the save (null if there is none).
+    /// <para>
+    /// <paramref name="covered"/> (Phase 10, ADR-0013): the whole hours that this save aggregated, recorded in
+    /// <c>analytics.aggregated_hours</c> in the same transaction, with or without rows (an hour without facilities is
+    /// still aggregated). Retention archives and removes a day only when its 24 hours are recorded there; the worker's
+    /// checkpoint alone does not prove it (the first run starts <see cref="AnalyticsOptions.InitialHours"/> back, and
+    /// manual aggregations do not move it).
+    /// </para>
     /// </summary>
-    Task<DateTimeOffset?> SaveAsync(IReadOnlyList<OccupancyHourlySummary> rows, DateTimeOffset? checkpoint, CancellationToken cancellationToken);
+    Task<DateTimeOffset?> SaveAsync(
+        IReadOnlyList<OccupancyHourlySummary> rows,
+        DateTimeOffset? checkpoint,
+        AggregatedRange? covered,
+        CancellationToken cancellationToken);
 }
+
+/// <summary>A range of whole UTC hours, [<paramref name="From"/>, <paramref name="To"/>).</summary>
+public sealed record AggregatedRange(DateTimeOffset From, DateTimeOffset To);
 
 /// <summary>Settings of the occupancy aggregation (section <c>Analytics</c>, ADR-0010).</summary>
 public sealed class AnalyticsOptions

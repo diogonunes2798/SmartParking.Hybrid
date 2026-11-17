@@ -599,6 +599,114 @@ namespace SmartParking.Infrastructure.Relational.Migrations
                     b.ToTable("outbox_messages", (string)null);
                 });
 
+            modelBuilder.Entity("SmartParking.Infrastructure.Relational.Retention.AggregatedHourRow", b =>
+                {
+                    b.Property<DateTimeOffset>("HourStart")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("hour_start");
+
+                    b.Property<DateTimeOffset>("AggregatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("aggregated_at");
+
+                    b.HasKey("HourStart")
+                        .HasName("pk_aggregated_hours");
+
+                    b.ToTable("aggregated_hours", "analytics");
+                });
+
+            modelBuilder.Entity("SmartParking.Infrastructure.Relational.Retention.RetentionArchiveRow", b =>
+                {
+                    b.Property<DateOnly>("Day")
+                        .HasColumnType("date")
+                        .HasColumnName("day");
+
+                    b.Property<DateTimeOffset>("ArchivedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("archived_at");
+
+                    b.Property<long>("Bytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("bytes");
+
+                    b.Property<long>("Events")
+                        .HasColumnType("bigint")
+                        .HasColumnName("events");
+
+                    b.Property<string>("File")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)")
+                        .HasColumnName("file");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("sha256");
+
+                    b.HasKey("Day")
+                        .HasName("pk_retention_archive");
+
+                    b.ToTable("retention_archive", "analytics");
+                });
+
+            modelBuilder.Entity("SmartParking.Infrastructure.Relational.Retention.RetentionPositionRow", b =>
+                {
+                    b.Property<string>("Name")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("name");
+
+                    b.Property<DateTimeOffset>("Position")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("position");
+
+                    b.HasKey("Name")
+                        .HasName("pk_retention_positions");
+
+                    b.ToTable("retention_positions", "analytics");
+                });
+
+            modelBuilder.Entity("SmartParking.Infrastructure.Relational.Retention.SpotStateSnapshotRow", b =>
+                {
+                    b.Property<Guid>("SpotId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("spot_id");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_id");
+
+                    b.Property<Guid>("FacilityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("facility_id");
+
+                    b.Property<DateTimeOffset>("SavedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("saved_at");
+
+                    b.Property<DateTimeOffset>("Timestamp")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("timestamp");
+
+                    b.Property<short>("Type")
+                        .HasColumnType("smallint")
+                        .HasColumnName("type");
+
+                    b.HasKey("SpotId")
+                        .HasName("pk_spot_state_snapshot");
+
+                    b.HasIndex("FacilityId")
+                        .HasDatabaseName("ix_spot_state_snapshot_facility_id");
+
+                    b.ToTable("spot_state_snapshot", "analytics", t =>
+                        {
+                            t.HasCheckConstraint("ck_spot_state_snapshot_type", "type IN (1, 2)");
+                        });
+                });
+
             modelBuilder.Entity("SmartParking.Domain.Facilities.ParkingSpot", b =>
                 {
                     b.HasOne("SmartParking.Domain.Facilities.ParkingFacility", null)
