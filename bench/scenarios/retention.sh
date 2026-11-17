@@ -14,7 +14,8 @@
 #                 production, so that its CPU is measured with the Workers process and the TTL guard keeps running), after
 #                 an initial delay within which the CPU snapshot is taken (the start-up of the process is not counted).
 #                 The service archives and removes the first half of the days. The run waits until no event is left
-#                 before the horizon minus the guard margin (MongoDB keeps that margin by design; the monolithic DROP
+#                 before the horizon minus the guard margin minus one minute (MongoDB keeps that margin by design, and
+#                 the guard rounds it up to the minute; the monolithic DROP
 #                 removes whole days). Rows: cpu_retention_*, storage_after_retention_*, archive_*, events_*;
 #   5. compact:   hybrid only: `compact` returns the space freed by the TTL deletes to the file system (the TTL monitor
 #                 only frees it inside WiredTiger: storageSize does not shrink). Rows: cpu_compact_*, storage_after_compact_*.
@@ -60,14 +61,18 @@ retention_dates() {
   RETENTION_START=$(day_utc "-$((RETENTION_DAYS + 1))")
   RETENTION_HORIZON=$(day_utc "-$((RETENTION_DAYS + 1 - RETENTION_REMOVED_DAYS))")
   RETENTION_END=$(day_utc "-1")
-  RETENTION_KEPT_FROM=$(date -u -d "$RETENTION_HORIZON - $RETENTION_MARGIN_MINUTES minutes" +%Y-%m-%dT%H:%M:%SZ)
+  # One minute more than the margin: the guard rounds expireAfterSeconds up to the minute, so the TTL limit moves
+  # between (horizon - margin - 1 min) and (horizon - margin). Waiting for an empty [start, horizon - margin) failed
+  # with 1e6 events: about 3 events per sensor second, and some always stood in that last minute.
+  RETENTION_KEPT_FROM=$(date -u -d "$RETENTION_HORIZON - $((RETENTION_MARGIN_MINUTES + 1)) minutes" +%Y-%m-%dT%H:%M:%SZ)
 }
 
 # Settings of the API and the Workers of this scenario (exported: run.sh starts both from this shell).
 # - ArchiveDelay = (days from the horizon to today): exactly the days before the horizon are old enough to be archived,
 #   whatever the hour of the run, so the purge horizon is min(now - RawEvents, archived) = the horizon above.
 # - GuardMargin RETENTION_MARGIN_MINUTES: the guard runs every RETENTION_INTERVAL_SECONDS, so the TTL limit stays at the
-#   horizon minus that margin; MongoDB keeps those minutes before the horizon (events_removed records it).
+#   horizon minus that margin (up to one minute earlier: rounding); MongoDB keeps those minutes before the horizon
+#   (events_removed records it).
 # - MaxEventAge (DAYS + 3 days) is above ArchiveDelay here: the load sends events of past days on purpose, and no event
 #   arrives after its day is archived (review of Phase 10, finding 3: in production MaxEventAge <= ArchiveDelay).
 export Ingestion__MaxEventAge="$((RETENTION_DAYS + 3)).00:00:00"
