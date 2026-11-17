@@ -24,7 +24,10 @@ import sys
 
 def sh(*cmd):
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL).stdout.strip()
+        # UTF-8 explicitly (Phase 10): with text=True alone, Windows decodes with cp1252 and a git diff with Portuguese
+        # text failed with UnicodeDecodeError, leaving stdout None.
+        return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+                              stdin=subprocess.DEVNULL).stdout.strip()
     except (OSError, subprocess.SubprocessError) as e:
         return f"unavailable ({e.__class__.__name__})"
 

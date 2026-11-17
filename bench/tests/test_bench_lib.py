@@ -157,6 +157,12 @@ class E2eLatencyTests(unittest.TestCase):
 
 
 class MetaTests(unittest.TestCase):
+    def test_command_output_is_read_as_utf8(self):
+        # Phase 10: a git diff with Portuguese text broke write_meta on Windows (cp1252 by default).
+        import write_meta
+        out = write_meta.sh(sys.executable, "-c", "import sys; sys.stdout.buffer.write('ação é'.encode('utf-8'))")
+        self.assertEqual(out, "ação é")
+
     def test_environment_keeps_overrides_and_hides_credentials(self):
         import write_meta
         saved = dict(os.environ)
