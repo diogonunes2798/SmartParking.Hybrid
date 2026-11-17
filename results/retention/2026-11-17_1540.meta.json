@@ -1,0 +1,91 @@
+{
+  "scenario": "retention",
+  "variant": "hybrid",
+  "runs": 5,
+  "warmup_seconds": 0,
+  "command": "./bench/run.sh retention --variant hybrid --runs 5 --warmup 0",
+  "started": "2026-11-17T15:40:43+00:00",
+  "git": {
+    "commit": "2c946098843f5ce44595929683b5eb296dd63415",
+    "branch": "phase-10-retention",
+    "uncommitted_changes": [],
+    "uncommitted_diff": ""
+  },
+  "environment": {},
+  "images": {
+    "postgres": "postgis/postgis:16-3.5-alpine@sha256:47e961a569fd52ff31f0fe205ed91eeab17d9f5fff6722e6d7ea6b588748b293",
+    "mongo": "mongo:7.0.48@sha256:9896df581dfd0718b7abe112f4c37598d0986c54060e4ec1384997e6503c8c71",
+    "redis": "redis:7.4.12-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe",
+    "prometheus": "prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06",
+    "jaeger": "jaegertracing/jaeger:2.11.0@sha256:b585df1b6299bbbd16bf7c679da30389349736e4b6bc8f4f500142a75bf26ca8",
+    "k6": "grafana/k6:1.4.2@sha256:3656673de3f30424e8ebcfa46acd9558d83b6a43612d0f668ffeac953950c6c7"
+  },
+  "tools": {
+    "dotnet_sdk": "10.0.404",
+    "docker": "29.0.1",
+    "docker_compose": "2.40.3-desktop.1",
+    "python": "3.14.10"
+  },
+  "machine": {
+    "os": "Windows-11-10.0.26100-SP0",
+    "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+    "logical_cpus": 12,
+    "memory_bytes": 25716453376,
+    "docker_cpus": "12",
+    "docker_memory_bytes": "12514963456"
+  },
+  "runs_detail": {
+    "1": {
+      "seed_seconds": "11",
+      "sensor_start": "2026-11-12T00:00:00Z",
+      "horizon": "2026-11-14T00:00:00Z",
+      "clock_skew_mongo_ms_start": "0",
+      "load_started": "15:41:56.503",
+      "simulator_exit": "0",
+      "retention_snapshot": "16:15:59.771",
+      "clock_skew_mongo_ms_end": "4"
+    },
+    "2": {
+      "seed_seconds": "13",
+      "sensor_start": "2026-11-12T00:00:00Z",
+      "horizon": "2026-11-14T00:00:00Z",
+      "clock_skew_mongo_ms_start": "27",
+      "load_started": "16:18:53.357",
+      "simulator_exit": "0",
+      "retention_snapshot": "16:52:55.448",
+      "clock_skew_mongo_ms_end": "20"
+    },
+    "3": {
+      "seed_seconds": "13",
+      "sensor_start": "2026-11-12T00:00:00Z",
+      "horizon": "2026-11-14T00:00:00Z",
+      "clock_skew_mongo_ms_start": "29",
+      "load_started": "16:55:50.048",
+      "simulator_exit": "0",
+      "retention_snapshot": "17:29:50.585",
+      "clock_skew_mongo_ms_end": "30"
+    },
+    "4": {
+      "seed_seconds": "14",
+      "sensor_start": "2026-11-12T00:00:00Z",
+      "horizon": "2026-11-14T00:00:00Z",
+      "clock_skew_mongo_ms_start": "25",
+      "load_started": "17:32:45.211",
+      "simulator_exit": "4",
+      "retention_snapshot": "18:06:46.329",
+      "clock_skew_mongo_ms_end": "14"
+    },
+    "5": {
+      "seed_seconds": "15",
+      "sensor_start": "2026-11-12T00:00:00Z",
+      "horizon": "2026-11-14T00:00:00Z",
+      "clock_skew_mongo_ms_start": "37",
+      "load_started": "18:09:26.944",
+      "simulator_exit": "0",
+      "retention_snapshot": "18:43:30.408",
+      "clock_skew_mongo_ms_end": "25"
+    }
+  },
+  "finished": "2026-11-17T18:45:01+00:00",
+  "status": "ok"
+}
