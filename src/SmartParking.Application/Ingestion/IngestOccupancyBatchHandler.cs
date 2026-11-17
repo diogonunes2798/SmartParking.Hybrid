@@ -26,6 +26,13 @@ public sealed class IngestionSettings
     /// Default 5 minutes. TODO(Diogo): confirm the tolerance for sensor clock drift (Cap. 3).
     /// </summary>
     public TimeSpan MaxClockSkew { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// How far in the past a sensor <c>timestamp</c> may be (Phase 10, ADR-0013). An older event would arrive after its
+    /// day was archived, or behind the retention purge horizon, and be removed without ever being aggregated or archived.
+    /// Must be at most <c>Retention:ArchiveDelay</c> (Workers). Default 7 days. TODO(Diogo): confirm (Cap. 3).
+    /// </summary>
+    public TimeSpan MaxEventAge { get; set; } = TimeSpan.FromDays(7);
 }
 
 /// <summary>An event of the batch that failed RF-01 validation, by position in the request array.</summary>
@@ -83,7 +90,7 @@ public sealed class IngestOccupancyBatchHandler(
 
         foreach (var item in body.EnumerateArray())
         {
-            var message = OccupancyEventValidator.Validate(item, receivedAt, settings.MaxClockSkew, out var errors);
+            var message = OccupancyEventValidator.Validate(item, receivedAt, settings.MaxClockSkew, settings.MaxEventAge, out var errors);
             if (message is null)
             {
                 rejected.Add(new RejectedEvent(index, OccupancyEventValidator.TryReadEventId(item), errors));
