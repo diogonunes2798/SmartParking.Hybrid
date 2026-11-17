@@ -42,6 +42,29 @@ public sealed class MonolithicRawEventRetention(NpgsqlDataSource dataSource) : I
         return earliest;
     }
 
+    public async Task<IReadOnlyDictionary<DateTimeOffset, DateTimeOffset>> GetLastStoredAtPerHourAsync(
+        DateTimeOffset since, DateTimeOffset until, CancellationToken cancellationToken)
+    {
+        var command = dataSource.CreateCommand(
+            $"""
+             SELECT date_trunc('hour', "timestamp", 'UTC'), max(stored_at)
+             FROM {MonolithicSchema.OccupancyEvents}
+             WHERE "timestamp" >= @from AND "timestamp" < @to
+             GROUP BY 1
+             """);
+        await using var scope = command.ConfigureAwait(false);
+        AddRange(command, since, until);
+        var result = new Dictionary<DateTimeOffset, DateTimeOffset>();
+        var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        await using var readerScope = reader.ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            result[reader.GetFieldValue<DateTimeOffset>(0).ToUniversalTime()] = reader.GetFieldValue<DateTimeOffset>(1).ToUniversalTime();
+        }
+
+        return result;
+    }
+
     public async Task<long> CountAsync(DateTimeOffset since, DateTimeOffset until, CancellationToken cancellationToken)
     {
         var command = dataSource.CreateCommand(

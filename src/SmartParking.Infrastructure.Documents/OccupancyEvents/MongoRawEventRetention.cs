@@ -58,6 +58,33 @@ public sealed class MongoRawEventRetention(
         return first is null ? null : new DateTimeOffset(first["timestamp"].ToUniversalTime(), TimeSpan.Zero);
     }
 
+    public async Task<IReadOnlyDictionary<DateTimeOffset, DateTimeOffset>> GetLastStoredAtPerHourAsync(
+        DateTimeOffset since, DateTimeOffset until, CancellationToken cancellationToken)
+    {
+        BsonDocument[] pipeline =
+        [
+            new("$match", Range(since, until)),
+            new("$group", new BsonDocument
+            {
+                { "_id", new BsonDocument("$dateTrunc", new BsonDocument { { "date", "$timestamp" }, { "unit", "hour" } }) },
+                { "last", new BsonDocument("$max", "$storedAt") },
+            }),
+        ];
+        var result = new Dictionary<DateTimeOffset, DateTimeOffset>();
+        using var cursor = await collection.AggregateAsync<BsonDocument>(pipeline, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
+        {
+            foreach (var hour in cursor.Current)
+            {
+                result[new DateTimeOffset(hour["_id"].ToUniversalTime(), TimeSpan.Zero)] =
+                    new DateTimeOffset(hour["last"].ToUniversalTime(), TimeSpan.Zero);
+            }
+        }
+
+        return result;
+    }
+
     public Task<long> CountAsync(DateTimeOffset since, DateTimeOffset until, CancellationToken cancellationToken) =>
         collection.CountDocumentsAsync(Range(since, until), cancellationToken: cancellationToken);
 

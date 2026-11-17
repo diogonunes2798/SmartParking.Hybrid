@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using SmartParking.Application.Abstractions;
 using SmartParking.Application.Analytics;
 
@@ -48,11 +49,27 @@ public sealed class OccupancyRetention(
     {
         if (!options.Enabled)
         {
-            return RetentionReport.Disabled;
+            // Fail closed (review of Phase 10, finding 1): retention switched off after it was on must not leave the
+            // MongoDB TTL index at the last value of the guard, which would go on removing unarchived days.
+            var reset = await store.EnforceAsync(null, cancellationToken).ConfigureAwait(false);
+            return RetentionReport.Disabled with { Enforcement = reset };
         }
 
         var now = time.GetUtcNow();
-        var (days, events, blocked) = await ArchiveAsync(now, cancellationToken).ConfigureAwait(false);
+        int days = 0;
+        long events = 0;
+        string? blocked = null;
+        ExceptionDispatchInfo? failure = null;
+        try
+        {
+            (days, events, blocked) = await ArchiveAsync(now, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The guard below still runs (finding 1): an archive that keeps failing (disk full) must not leave the TTL
+            // index unattended. The horizon does not move, because the archived position did not.
+            failure = ExceptionDispatchInfo.Capture(ex);
+        }
 
         var archivedUntil = await ledger.GetArchivedUntilAsync(cancellationToken).ConfigureAwait(false);
         var horizon = await ledger.GetPurgeHorizonAsync(cancellationToken).ConfigureAwait(false);
@@ -67,6 +84,7 @@ public sealed class OccupancyRetention(
         }
 
         var enforcement = await store.EnforceAsync(horizon, cancellationToken).ConfigureAwait(false);
+        failure?.Throw();
         return new RetentionReport(days, events, archivedUntil, horizon, enforcement, blocked);
     }
 
@@ -105,11 +123,21 @@ public sealed class OccupancyRetention(
                 continue;
             }
 
-            var covered = await ledger.CountAggregatedHoursAsync(start.Value, end, cancellationToken).ConfigureAwait(false);
-            if (covered < 24)
+            var aggregated = await ledger.GetAggregatedAtPerHourAsync(start.Value, end, cancellationToken).ConfigureAwait(false);
+            if (aggregated.Count < 24)
             {
                 return (days, events, Invariant(
-                    $"{day:yyyy-MM-dd} has {covered} of 24 hours aggregated (UC-04): run aggregate-occupancy for it first"));
+                    $"{day:yyyy-MM-dd} has {aggregated.Count} of 24 hours aggregated (UC-04): run aggregate-occupancy for it first"));
+            }
+
+            // Late events (review of Phase 10, finding 2): an event stored after the last aggregation of its hour is not in
+            // the summary. Archiving and removing it would lose it from the UC-04 reports for good.
+            var stored = await store.GetLastStoredAtPerHourAsync(start.Value, end, cancellationToken).ConfigureAwait(false);
+            var late = stored.Where(h => !aggregated.TryGetValue(h.Key, out var at) || h.Value > at).Select(h => h.Key).ToList();
+            if (late.Count > 0)
+            {
+                return (days, events, Invariant(
+                    $"{day:yyyy-MM-dd} has events stored after the last aggregation of {late.Count} hour(s) (first {late.Min():HH:mm}): run aggregate-occupancy for it again"));
             }
 
             var file = await archive.WriteDayAsync(day, store.ExportAsync(start.Value, end, cancellationToken), cancellationToken)

@@ -19,7 +19,9 @@ public sealed class GzipNdjsonEventArchive(RetentionOptions options) : IEventArc
         ArgumentNullException.ThrowIfNull(lines);
         var path = PathOf(day);
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
-        var partial = path + ".partial";
+        // A name of its own per writer: two Workers instances archiving the same day do not collide on the temporary file
+        // (review of Phase 10, finding 5); the last rename wins and both files have the same events.
+        var partial = path + "." + Guid.NewGuid().ToString("N") + ".partial";
 
         long count = 0;
         var file = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, useAsync: true);

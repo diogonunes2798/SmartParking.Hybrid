@@ -15,6 +15,15 @@ internal sealed partial class RetentionService(
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        try
+        {
+            await Task.Delay(options.InitialDelay, time, stoppingToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -30,7 +39,7 @@ internal sealed partial class RetentionService(
                             report.Enforcement?.ExpireAfterSeconds, report.Enforcement?.DroppedPartitions.Count ?? 0);
                     }
 
-                    if (report.Blocked is { } blocked)
+                    if (options.Enabled && report.Blocked is { } blocked)
                     {
                         LogBlocked(blocked);
                     }

@@ -13,13 +13,16 @@ namespace SmartParking.Infrastructure.Relational.Retention;
 /// </summary>
 internal sealed class EfRetentionLedger(SmartParkingDbContext context) : IRetentionLedger
 {
-    public async Task<int> CountAggregatedHoursAsync(DateTimeOffset since, DateTimeOffset until, CancellationToken cancellationToken)
+    public async Task<IReadOnlyDictionary<DateTimeOffset, DateTimeOffset>> GetAggregatedAtPerHourAsync(
+        DateTimeOffset since, DateTimeOffset until, CancellationToken cancellationToken)
     {
         var start = since.ToUniversalTime();
         var end = until.ToUniversalTime();
-        return await context.Set<AggregatedHourRow>().AsNoTracking()
-            .CountAsync(h => h.HourStart >= start && h.HourStart < end, cancellationToken)
+        var rows = await context.Set<AggregatedHourRow>().AsNoTracking()
+            .Where(h => h.HourStart >= start && h.HourStart < end)
+            .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
+        return rows.ToDictionary(h => h.HourStart.ToUniversalTime(), h => h.AggregatedAt.ToUniversalTime());
     }
 
     public Task<DateTimeOffset?> GetArchivedUntilAsync(CancellationToken cancellationToken) =>

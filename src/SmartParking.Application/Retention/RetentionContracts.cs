@@ -12,7 +12,10 @@ public sealed class RetentionOptions
 {
     public const string SectionName = "Retention";
 
-    /// <summary>False: nothing is archived and nothing is removed (the MongoDB TTL index stays at its «never» value).</summary>
+    /// <summary>
+    /// False: nothing is archived and nothing is removed. The service still runs and sets the MongoDB TTL index back to
+    /// «never» (fail closed, review of Phase 10, finding 1).
+    /// </summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>
@@ -40,6 +43,12 @@ public sealed class RetentionOptions
     /// <summary>How often the Workers run the retention.</summary>
     public TimeSpan Interval { get; set; } = TimeSpan.FromMinutes(1);
 
+    /// <summary>
+    /// Wait before the first run after the Workers start (default 0). The retention benchmark restarts the Workers with
+    /// retention on and takes its CPU snapshot within this delay, so that the start-up of the process is not counted.
+    /// </summary>
+    public TimeSpan InitialDelay { get; set; }
+
     /// <summary>Upper bound of days archived in one run (a long backlog is caught up over several runs).</summary>
     public int MaxDaysPerRun { get; set; } = 7;
 
@@ -49,7 +58,7 @@ public sealed class RetentionOptions
     public void Validate()
     {
         if (RawEvents < TimeSpan.FromHours(1) || ArchiveDelay < TimeSpan.Zero || GuardMargin <= TimeSpan.Zero
-            || HorizonStep <= TimeSpan.Zero || Interval <= TimeSpan.Zero)
+            || HorizonStep <= TimeSpan.Zero || Interval <= TimeSpan.Zero || InitialDelay < TimeSpan.Zero)
         {
             throw new InvalidOperationException(
                 $"{SectionName}: RawEvents >= 1 h, ArchiveDelay >= 0, and GuardMargin, HorizonStep, Interval positive.");
@@ -70,6 +79,13 @@ public interface IRawEventRetentionStore
 {
     /// <summary>Timestamp of the oldest event still stored, or null when the store is empty.</summary>
     Task<DateTimeOffset?> GetEarliestTimestampAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// For each UTC hour of [since, until) with events, the latest <c>storedAt</c> of its events (checked against the
+    /// aggregation of that hour before archiving: late events).
+    /// </summary>
+    Task<IReadOnlyDictionary<DateTimeOffset, DateTimeOffset>> GetLastStoredAtPerHourAsync(
+        DateTimeOffset since, DateTimeOffset until, CancellationToken cancellationToken);
 
     /// <summary>Events with <c>since &lt;= timestamp &lt; until</c>.</summary>
     Task<long> CountAsync(DateTimeOffset since, DateTimeOffset until, CancellationToken cancellationToken);
@@ -95,8 +111,9 @@ public sealed record EnforcementResult(long? ExpireAfterSeconds, IReadOnlyList<s
 /// </summary>
 public interface IRetentionLedger
 {
-    /// <summary>Number of distinct whole hours of [since, until) that the aggregation has covered (UC-04).</summary>
-    Task<int> CountAggregatedHoursAsync(DateTimeOffset since, DateTimeOffset until, CancellationToken cancellationToken);
+    /// <summary>The whole hours of [since, until) covered by the aggregation (UC-04), with the time of their last aggregation.</summary>
+    Task<IReadOnlyDictionary<DateTimeOffset, DateTimeOffset>> GetAggregatedAtPerHourAsync(
+        DateTimeOffset since, DateTimeOffset until, CancellationToken cancellationToken);
 
     /// <summary>End (exclusive) of the contiguous archived range, or null before the first archive.</summary>
     Task<DateTimeOffset?> GetArchivedUntilAsync(CancellationToken cancellationToken);

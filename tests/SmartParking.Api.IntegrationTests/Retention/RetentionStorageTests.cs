@@ -35,6 +35,10 @@ public sealed class MongoRetentionStorageTests(RetentionFixture fixture)
         var restarted = new MongoOccupancyEventLog(database, TimeProvider.System, new MongoEventLogOptions());
         await restarted.EnsureIndexesAsync(Ct);
         Assert.Equal(enforced.ExpireAfterSeconds, await retention.CurrentExpireAfterSecondsAsync(Ct));
+
+        // No horizon (retention switched off): back to «never» (fail closed).
+        await retention.EnforceAsync(null, Ct);
+        Assert.Equal(MongoOccupancyEventLog.NeverExpireSeconds, await retention.CurrentExpireAfterSecondsAsync(Ct));
     }
 }
 

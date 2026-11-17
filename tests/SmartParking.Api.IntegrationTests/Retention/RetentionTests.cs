@@ -11,7 +11,8 @@ namespace SmartParking.Api.IntegrationTests.Retention;
 /// DROP of daily partitions. One scenario in order, because the purge horizon only moves forward:
 /// <list type="number">
 /// <item>nothing is archived or removed while a day is not aggregated (UC-04 reports would lose data);</item>
-/// <item>an aggregated day is archived (file = store) and then removed, and nothing newer than the horizon is;</item>
+/// <item>an aggregated day with an event stored after its aggregation waits for a new aggregation (review of Phase 10,
+/// finding 2); then it is archived (file = store) and removed, and nothing newer than the horizon is;</item>
 /// <item>a manual aggregation before the horizon is refused (it would overwrite good rows from an incomplete log);</item>
 /// <item>a car parked since a removed day still counts as occupied in a later hour (spot state snapshot), and the
 /// «last event of every spot» used by the read model rebuild still has it.</item>
@@ -63,19 +64,33 @@ public sealed class RetentionTests(RetentionFixture fixture)
         await Task.Delay(TimeSpan.FromSeconds(3), Ct); // three TTL monitor passes
         Assert.Equal(7, await fixture.Store.CountAsync(a, end, Ct));
 
-        // 2. Day A aggregated: archived (3 events), horizon at its end, A removed, B and C kept.
+        // 2. Day A aggregated, then a late event of A stored: A waits for a new aggregation.
+        await AggregateAsync(a, b);
+        await fixture.Analytics.AppendAsync(facility, (busy, OccupancyEventType.Freed, a.AddHours(20)));
+        var waiting = await RunRetentionAsync();
+        Assert.Contains("stored after the last aggregation of 1 hour(s) (first 20:00)", waiting.Blocked, StringComparison.Ordinal);
+        Assert.Null(waiting.ArchivedUntil);
+
+        // Aggregated again: archived (4 events), horizon at its end, A removed, B and C kept.
         await AggregateAsync(a, b);
         var second = await RunRetentionAsync();
-        Assert.Equal((1, 3L), (second.DaysArchived, second.EventsArchived));
+        Assert.Equal((1, 4L), (second.DaysArchived, second.EventsArchived));
         Assert.Equal(b, second.ArchivedUntil);
         Assert.Equal(b, second.PurgeHorizon);
         Assert.Contains($"{b:yyyy-MM-dd} has 0 of 24 hours aggregated", second.Blocked, StringComparison.Ordinal);
-        Assert.Equal(3, ReadArchive(DateOnly.FromDateTime(a.UtcDateTime)).Count);
+        Assert.Equal(4, ReadArchive(DateOnly.FromDateTime(a.UtcDateTime)).Count);
         await EventuallyAsync(async () => await fixture.Store.CountAsync(a, b, Ct) == 0);
         Assert.Equal(4, await fixture.Store.CountAsync(b, end, Ct));
 
-        // 3. A manual aggregation before the horizon is refused.
+        // 3. A manual aggregation before the horizon is refused, and so is the save of such a range (finding 4: the horizon
+        // may move while the events are read).
         await Assert.ThrowsAsync<ArgumentException>(() => AggregateAsync(a, b));
+        await using (var scope = fixture.Services.CreateAsyncScope())
+        {
+            var summaries = scope.ServiceProvider.GetRequiredService<Application.Analytics.IOccupancySummaryStore>();
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => summaries.SaveAsync([], null, new Application.Analytics.AggregatedRange(a, b, DateTimeOffset.UtcNow), Ct));
+        }
 
         // 4. B and C aggregated: archived and removed. The two empty days after C are recorded without a file, and the
         // archive stops at the later day, not aggregated: horizon = min(now − 10 d, archived) = start of that day.
@@ -101,6 +116,27 @@ public sealed class RetentionTests(RetentionFixture fixture)
         }
 
         Assert.Contains(latest, e => e.SpotId == parked && e.Type == OccupancyEventType.Occupied && e.Timestamp == a.AddHours(10));
+
+        // 6. Monolithic: the daily partition maintenance does not bring the dropped days back, even when PartitionDaysBehind
+        // reaches them (review of Phase 10, finding 8).
+        if (TestMode.IsMonolithic)
+        {
+            var dataSource = fixture.Services.GetRequiredService<Npgsql.NpgsqlDataSource>();
+            var maintenance = new Infrastructure.Relational.Monolithic.OccupancyPartitionMaintenance(
+                dataSource,
+                new Infrastructure.Relational.Monolithic.MonolithicOptions
+                {
+                    PartitionInterval = Infrastructure.Relational.Monolithic.PartitionInterval.Day,
+                    PartitionDaysBehind = 30,
+                },
+                TimeProvider.System);
+            await maintenance.EnsureAsync(Ct);
+            var name = $"monolith.occupancy_events_d{a:yyyyMMdd}";
+            var command = dataSource.CreateCommand("SELECT to_regclass(@name) IS NOT NULL");
+            await using var _ = command;
+            command.Parameters.AddWithValue("name", name);
+            Assert.False((bool)(await command.ExecuteScalarAsync(Ct))!, $"{name} was created again");
+        }
     }
 
     private static string AnalyticsFixtureZone() => Analytics.AnalyticsFixture.NewZone();

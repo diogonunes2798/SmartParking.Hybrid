@@ -51,7 +51,9 @@ public interface IOccupancySummaryStore
     /// <c>analytics.aggregated_hours</c> in the same transaction, with or without rows (an hour without facilities is
     /// still aggregated). Retention archives and removes a day only when its 24 hours are recorded there; the worker's
     /// checkpoint alone does not prove it (the first run starts <see cref="AnalyticsOptions.InitialHours"/> back, and
-    /// manual aggregations do not move it).
+    /// manual aggregations do not move it). A range that starts before the retention purge horizon is refused inside the
+    /// transaction (<see cref="InvalidOperationException"/>): the horizon may have moved while the events were read
+    /// (review of Phase 10, finding 4).
     /// </para>
     /// </summary>
     Task<DateTimeOffset?> SaveAsync(
@@ -61,8 +63,9 @@ public interface IOccupancySummaryStore
         CancellationToken cancellationToken);
 }
 
-/// <summary>A range of whole UTC hours, [<paramref name="From"/>, <paramref name="To"/>).</summary>
-public sealed record AggregatedRange(DateTimeOffset From, DateTimeOffset To);
+/// <summary>A range of whole UTC hours, [<paramref name="From"/>, <paramref name="To"/>), aggregated at <paramref name="AggregatedAt"/>
+/// (taken before reading, like the rows: an event stored later may be missing from them).</summary>
+public sealed record AggregatedRange(DateTimeOffset From, DateTimeOffset To, DateTimeOffset AggregatedAt);
 
 /// <summary>Settings of the occupancy aggregation (section <c>Analytics</c>, ADR-0010).</summary>
 public sealed class AnalyticsOptions

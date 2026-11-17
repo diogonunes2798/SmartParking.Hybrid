@@ -155,7 +155,7 @@ public sealed class OccupancyAggregator(
             }
         }
 
-        var stored = await store.SaveAsync(rows, checkpoint, new AggregatedRange(from, to), cancellationToken).ConfigureAwait(false);
+        var stored = await store.SaveAsync(rows, checkpoint, new AggregatedRange(from, to, aggregatedAt), cancellationToken).ConfigureAwait(false);
 
         var report = new AggregationReport(from, to, snapshot.Count, Hours(from, to), rows.Count, events, stopwatch.Elapsed);
         metrics.Aggregated(report);

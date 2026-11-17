@@ -79,7 +79,6 @@ builder.Services.AddScoped<OccupancyAggregator>();
 // Retention of the raw events (RNF-05, Phase 10, ADR-0013), both variants. Settings: Retention (RawEvents, ArchiveDelay,
 // GuardMargin, ArchivePath, ...). Also wraps the event log so that aggregations and rebuilds read the spot state snapshot.
 builder.Services.AddRetention(builder.Configuration);
-var retention = builder.Configuration.GetSection(RetentionOptions.SectionName).Get<RetentionOptions>() ?? new();
 
 if (!rebuildOnly && monolithic)
 {
@@ -146,10 +145,8 @@ if (!rebuildOnly)
         builder.Services.AddHostedService<OccupancyAggregationService>();
     }
 
-    if (retention.Enabled)
-    {
-        builder.Services.AddHostedService<RetentionService>();
-    }
+    // Always registered: with Retention:Enabled=false it only sets the MongoDB TTL index back to «never» (fail closed).
+    builder.Services.AddHostedService<RetentionService>();
 }
 
 var app = builder.Build();
