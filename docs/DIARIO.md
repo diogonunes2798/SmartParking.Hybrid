@@ -1475,3 +1475,147 @@ Os achados 3, 4 e 7 da revisão da Fase 2b (idas e voltas à BD por comando, ín
   - confirmar a duração e a carga do aquecimento de cada cenário (60 s por omissão, com a mesma carga da parte medida).
 - O D7 continua a ser medido por limites superiores de *bucket* (50, 75, 100, 150, 200, 250 ms…). Para o `ingest-scale` pode ser preciso um *bucket* mais fino (ponto já levantado na Fase 8).
 - A latência do k6 inclui o salto da rede do Docker Desktop. Para separar este efeito, pode-se correr uma vez o mesmo *script* com um k6 instalado no anfitrião e comparar.
+
+## 17-11-2026 — Fase 10a: retenção e sustentabilidade (RNF-05, §9 passo 10)
+
+Objetivo: implementar o RNF-05 nas duas variantes (TTL com guarda e arquivo no MongoDB; `DROP` de partições diárias no monolítico), comparar o compressor por omissão com o `zstd` e medir disco e CPU com 10⁶ eventos. Ramo `phase-10-retention`. Os passos 6 e 7 do guião (revisão final de toda a solução, revisão global e resumo das 10 fases) ficam para a sessão 10b.
+
+### Plano e decisões (antes do código)
+
+O Diogo aprovou o plano com estas escolhas:
+
+| Ponto | Escolha |
+|---|---|
+| Prazo dos eventos em bruto | **30 dias**, provisório (`TODO(Diogo)`; a especificação não tem prazos) |
+| Proteção do UC-04 | **TTL + guarda**: o TTL nunca passa o horizonte de purga, que só avança sobre dias agregados e arquivados |
+| Carga do cenário | **pela API** (o caminho real do UC-01), e não por inserção direta |
+| Partições do monolítico | **granularidade configurável** (`Month`/`Day`), diária no cenário |
+
+A decisão completa, com alternativas e consequências, está no ADR-0013 (o número 0011 já estava ocupado).
+
+### O que foi feito
+
+- **Retenção na camada de aplicação** (`Application/Retention`), igual nas duas variantes. Cada execução segue sempre a mesma ordem:
+  1. arquiva os dias com 24 horas agregadas e sem eventos guardados depois da última agregação;
+  2. tira a fotografia do estado de cada lugar;
+  3. avança o horizonte para `min(agora − RawEvents, arquivado até)`, e só para a frente;
+  4. aplica o horizonte no armazém.
+- **MongoDB:** índice TTL `ix_timestamp_ttl` (começa em «nunca»), mantido pela guarda com `collMod`; compressor configurável na criação da coleção (`Mongo:EventsBlockCompressor`).
+- **Monolítico:** partições diárias criadas à frente; a retenção faz `DROP` das partições inteiramente antes do horizonte, com o pai bloqueado primeiro.
+- **Arquivo:** um `*.ndjson.gz` por dia, escrito por um ficheiro temporário, com contagem de linhas e SHA-256 registados em `analytics.retention_archive`.
+- **UC-04 e UC-05 protegidos:**
+  - tabela `aggregated_hours`, que regista o instante em que cada hora foi agregada;
+  - o agregador e a gravação do resumo recusam intervalos antes do horizonte (`FOR SHARE`);
+  - a fotografia do estado dos lugares mantém os carros estacionados há mais tempo do que o prazo.
+- **Ingestão:** a validação do RF-01 recusa eventos mais antigos do que `Ingestion:MaxEventAge` (7 dias, `TODO(Diogo)`).
+- **Simulador:** relógio dos sensores no passado (`--sensor-start`, `--time-scale`), para carregar 4 dias UTC em cerca de 33 min.
+- **Cenário `retention`** (`bench/scenarios/retention.sh`) e `bench/lib/retention_stats.py` (espaço, CPU por cgroup e por processo, arquivo, contagens, desvio do relógio).
+
+### Como se testou que os testes apanham os erros (mutações)
+
+Onze mutações, todas apanhadas (as M6 e M8 só depois de um teste novo):
+
+| # | Mutação | Apanhada por |
+|---|---|---|
+| M1 | o horizonte ignora a posição do arquivo | `RetentionTests` (cenário completo) |
+| M2 | sem verificação das 24 horas agregadas | `RetentionTests` |
+| M3 | sem fotografia antes de o horizonte avançar | `RetentionTests` |
+| M4 | o decorador ignora a fotografia | `RetentionTests` |
+| M5 | agregação manual antes do horizonte permitida | `RetentionTests` |
+| M6 | contagem do arquivo não verificada | sobreviveu; apanhada depois por `RetentionOrderTests` |
+| M7 | retenção desligada deixa o TTL como estava | `Retention_switched_off_sets_the_store_back_to_never` |
+| M8 | um arquivo que falha salta a guarda | primeira versão não compilava; a equivalente foi apanhada por `A_failing_archive_still_refreshes_the_guard_with_the_current_horizon_and_rethrows` |
+| M9 | eventos atrasados não verificados | `A_day_with_an_event_stored_after_its_aggregation_is_not_archived` e `RetentionTests` |
+| M10 | gravação do resumo antes do horizonte permitida | `RetentionTests` |
+| M11 | partições recriadas atrás do horizonte (monolítico) | `RetentionTests` em modo monolítico |
+
+### Problemas encontrados e tentativas falhadas
+
+- **O Docker Desktop não estava a correr** no arranque; foi arrancado à mão.
+- **CA1716:** parâmetros chamados `to` nas interfaces. Passaram a `since`/`until`.
+- **Usei `python -` e *heredocs* no Git Bash, contra a regra registada.** Uma vez a meio da implementação e outra ao resumir os resultados: os comandos ficaram pendurados e foram parados com `TaskStop`. São a quinta e a sexta ocorrência no diário.
+- **O decorador do log era *scoped*,** mas o log é consumido por *singletons* (o consumidor do *bus*). O armazém da fotografia passou a usar o `NpgsqlDataSource`, como *singleton*.
+- **O índice TTL ia no `CreateMany`.** Com o valor já baixado pela guarda, o arranque seguinte daria `IndexOptionsConflict` (85) e partiria a criação dos índices. Passou a ser criado à parte, com o 85 tratado como «já existe».
+- **Ordem dos *locks*:** o `DROP` de uma partição bloqueia a partição antes do pai, ao contrário de um `INSERT`. O pai passou a ser bloqueado primeiro, na função e na retenção.
+- **`aggregation_checkpoints` não servia para as posições da retenção:** um teste da Fase 6 lê essa tabela com `SingleOrDefault`. As posições ficaram na tabela própria `retention_positions`.
+- **Primeira execução do teste de retenção:** o armazém MongoDB vinha do DI da API, com `GuardMargin` de 1 dia, e o teste esperava 1 h. O TTL ficou em 490 h e nada expirou. A correção foi na *fixture*, não no código.
+- **Piloto 1 (20 000 eventos, híbrido): a espera pela remoção nunca terminava.** A guarda mantém a margem antes do horizonte; com `apply-retention` corrido uma só vez, a guarda deixava de correr e o CPU do arquivo ficava num processo não medido. O cenário passou a usar o serviço de retenção dos Workers, de 15 em 15 s, com margem de 5 min.
+- **Piloto 2:** o `write_meta.py` da Fase 9a lia o `git diff` com acentos em cp1252 (`UnicodeDecodeError`). Corrigido com teste.
+- **Piloto 3:** o `storageSize` subia depois da retenção e o `freeStorageSize` ficava em 0. O `collStats` mostra o último *checkpoint* do WiredTiger. Passaram a correr dois `fsync` antes de cada leitura.
+- **Teste instável:** `HealthAndTelemetryTests.Latency_histogram_uses_fine_buckets_around_the_200_ms_target` falhou uma vez na suíte completa e passou 2 em 2 isolado; a suíte completa seguinte passou toda. Não tem relação com a retenção e não foi corrigido nesta fase.
+- **Primeira sessão oficial (10:03) interrompida durante a carga.** A revisão independente chegou nesse momento e mostrou dois enviesamentos:
+  - as contagens corriam com `mongosh` dentro do cgroup do `mongo`, uma por segundo, nas janelas de CPU;
+  - o serviço de retenção podia arrancar durante a agregação medida.
+  
+  O `TaskStop` deixou vivos o `run.sh`, o simulador, a API e os Workers, que foram terminados pelo PID. Os resultados parciais foram retirados de `results/`.
+- **Segunda sessão oficial (10:42, *commit* `16547c8`): falhou na execução 1 do híbrido com `snappy`.** Ao fim de 30 min ainda havia eventos antes de `horizonte − margem`.
+  - Causa: a guarda arredonda `expireAfterSeconds` ao minuto para cima, por isso o corte do TTL fica até 60 s antes de `horizonte − margem`. Com 10⁶ eventos há cerca de 3 eventos por segundo de tempo do sensor, e fica sempre algum nesse último minuto.
+  - Confirmado ao vivo na série com `zstd`: restava um evento às 23:54:55,7, com o corte às 23:54:38 (`expireAfterSeconds` = 304 740).
+  - Os pilotos de 20 000 eventos passaram por sorte, porque a densidade era menor.
+  - Correção no cenário (`2c94609`): esperar por `horizonte − margem − 1 min`. O código da retenção não mudou.
+  - A série com `zstd` foi parada, os órfãos terminados pelo PID e os resultados postos de parte. Perderam-se cerca de 2 h de medição.
+  - O ficheiro de progresso dessa sessão ficou vazio, porque o `grep` num *pipe* acumula o output. Passou a usar `--line-buffered`.
+
+### Verificação (resultados reais)
+
+- `dotnet build`: 0 avisos.
+- `dotnet test` (híbrido): **287 testes, 287 passam**.
+- `Persistence__Mode=Monolithic dotnet test`: **284 testes: 245 passam, 39 ignorados (só do híbrido), 0 falhas**.
+- `python -m unittest discover -s bench/tests`: 22 testes, OK.
+- Testes novos da fase, em `tests/.../Retention/`: `RetentionTests` (cenário completo nas duas variantes), `RetentionOrderTests` (4), `RetentionUnitTests` (6), `SnapshotAwareLogTests` (2) e `RetentionStorageTests` (compressor e TTL no MongoDB; partições diárias no monolítico).
+
+### Medição oficial (passo 5)
+
+Três sessões de 5 execuções, sem aquecimento, *commit* `2c94609`, árvore limpa, `status: ok` em todas:
+
+| Configuração | Comando | Ficheiro |
+|---|---|---|
+| híbrido, `snappy` | `./bench/run.sh retention --variant hybrid --runs 5 --warmup 0` | `results/retention/2026-11-17_1236.csv` |
+| híbrido, `zstd` | `RETENTION_COMPRESSOR=zstd ./bench/run.sh retention --variant hybrid --runs 5 --warmup 0` | `results/retention/2026-11-17_1540.csv` |
+| monolítico, partições diárias | `./bench/run.sh retention --variant monolithic --runs 5 --warmup 0` | `results/retention/2026-11-17_1845.csv` |
+
+Em todas as execuções:
+- 999 264 eventos enviados, aceites (202) e guardados; 0 recusados e 0 erros;
+- 499 847 eventos elegíveis (antes do horizonte de 14-11-2026 00:00 UTC) e 2 ficheiros de arquivo (12 e 13 de novembro);
+- `crossed_midnight` = 0; desvio do relógio do `mongo` entre 0 e 44 ms.
+
+**Eventos removidos.** O monolítico removeu exatamente os 499 847 eventos elegíveis. O híbrido removeu entre 498 833 e 499 006: guardou entre 841 e 1 014 eventos dos últimos 5 a 6 min antes do horizonte. É a margem da guarda, por desenho.
+
+**Espaço** (mediana de 5 execuções; MB = 10⁶ bytes; dados + índices):
+
+| Fase | Híbrido `snappy` | Híbrido `zstd` | Monolítico |
+|---|---|---|---|
+| Depois da carga | 242,2 (82,7 + 160,3) | 217,4 (55,7 + 161,3) | 357,3 (134,4 + 222,9) |
+| Depois da retenção | 241,8 | 216,8 | 178,7 (67,2 + 111,6) |
+| Depois do `compact` | 99,6 (42,4 + 57,2) | 86,6 (28,5 + 58,1) | — |
+
+- O `zstd` reduz os dados em disco em 32,7 % (82,7 → 55,7 MB), mas os índices não mudam (o compressor da coleção não se aplica aos índices). No total, a redução é de 10,2 %.
+- No MongoDB, a remoção pelo TTL não reduz o espaço em disco: o `storageSize` fica igual. Só o `compact` o devolve ao sistema de ficheiros. No monolítico, o `DROP` liberta logo metade do espaço.
+- **Por explicar:** o `freeStorageSize` ficou em 0 também depois da retenção, apesar de ter sido removida metade dos documentos, por isso a linha `storage_*_used_bytes` é igual à `total` e não mostra o espaço reutilizável. A causa não foi confirmada.
+- Arquivo de 2 dias: cerca de 31,0 MB no híbrido (mediana 30 985 498 B com `snappy`) e 33,9 MB no monolítico (o `row_to_json` do PostgreSQL produz um JSON diferente do Extended JSON do MongoDB).
+
+**CPU** (mediana de 5 execuções, segundos, soma dos componentes da variante):
+
+| Janela | Híbrido `snappy` | Híbrido `zstd` | Monolítico |
+|---|---|---|---|
+| Carga, bruto | 628,4 [621,6; 633,4] | 619,8 [579,8; 639,5] | 190,6 [187,4; 192,2] |
+| Retenção, bruto | 45,7 [44,0; 48,9] | 48,3 [44,2; 48,8] | 11,5 [11,1; 11,8] |
+| Retenção, líquido | 30,4 [27,0; 33,4] | 29,9 [27,6; 31,0] | 9,9 [9,6; 10,1] |
+| `compact`, bruto | 2,5 [2,4; 3,8] | 3,7 [3,5; 4,2] | — |
+
+- Na carga do híbrido, por componente: `mongo` cerca de 340 s, `redis` cerca de 144 s, Workers cerca de 85 s, API cerca de 27 s e `postgres` cerca de 27 s. No monolítico: `postgres` cerca de 152 s, API cerca de 25 s e Workers cerca de 12 s.
+- **Os valores líquidos da janela de carga não são utilizáveis.** O repouso dura 30 s e é extrapolado para cerca de 2 020 s (×67). Por isso, o líquido do `postgres` no híbrido dá negativo (cerca de −30 s), e o do `mongo` varia entre 3 e 95 s de execução para execução. Por isso não estão na tabela.
+- **O bruto do `mongo` inclui o *healthcheck* do compose** (um `mongosh` de 5 em 5 s, cerca de 4 a 5 s de CPU por 30 s em repouso). Em 2 020 s isso pode chegar a cerca de 280 s dos ~340 s, o que torna a comparação bruta da carga desfavorável ao híbrido por uma razão alheia à arquitetura. É uma estimativa feita a partir da taxa em repouso, não uma medição.
+- A janela da retenção inclui o resto dos 30 s de `InitialDelay` e a espera pelo monitor TTL (de 60 em 60 s) e pelas contagens (de 15 em 15 s). Por isso `retention_seconds` (73 a 91 s no híbrido, 36 a 37 s no monolítico) não é a duração do trabalho.
+
+### Revisões independentes
+
+`docs/revisoes/fase-10-revisao-codigo.md`: 18 achados (2 altos). Corrigidos: 1, 2, 4, 5 (em parte), 8, 11 a 14, 17 e 18 (em parte). Documentados como limitações no ADR-0013: 3, 6, 7, 9 e 16. A revisão final de toda a solução fica para a sessão 10b.
+
+### Pontos a levar para a sessão 10b
+
+- **`TODO(Diogo)`:** confirmar os prazos `RawEvents` (30 dias), `ArchiveDelay` (8 dias), `GuardMargin` (1 dia) e `MaxEventAge` (7 dias).
+- **`TODO(Diogo)`:** como comparar o CPU da carga? Opções: desligar os *healthchecks* do compose durante a medição, ou alongar a janela de repouso. A janela de repouso atual não serve para o líquido das janelas longas.
+- Investigar o `freeStorageSize` = 0 depois do TTL, antes de usar `storage_*_used_bytes` na tese.
+- Teste por estabilizar: `Latency_histogram_uses_fine_buckets_around_the_200_ms_target`.
+- Fechar a rastreabilidade de todos os requisitos e fazer o resumo das 10 fases (passo 7 do guião).

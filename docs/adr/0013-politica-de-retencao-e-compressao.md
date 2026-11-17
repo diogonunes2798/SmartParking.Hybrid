@@ -173,4 +173,16 @@ Cada execução tem cinco passos:
 
 **Espaço.** Na carga e na retenção mede-se `storageSize`, `freeStorageSize` e os índices (no monolítico, o tamanho das partições). No híbrido mede-se também depois do `compact`.
 
-Resultados: ver o diário da Fase 10 e `results/retention/`.
+**Resultados** (*commit* `2c94609`; `results/retention/2026-11-17_1236.csv`, `_1540.csv`, `_1845.csv`; análise e limitações no diário da Fase 10). Medianas de 5 execuções, MB = 10⁶ bytes, dados + índices:
+
+| | Híbrido `snappy` | Híbrido `zstd` | Monolítico |
+|---|---|---|---|
+| Espaço depois da carga | 242,2 MB | 217,4 MB | 357,3 MB |
+| Espaço depois da retenção | 241,8 MB | 216,8 MB | 178,7 MB |
+| Espaço depois do `compact` | 99,6 MB | 86,6 MB | — |
+| Eventos removidos (de 499 847 elegíveis) | 498 833 a 499 006 | 498 836 a 499 001 | 499 847 |
+| CPU da retenção, bruto | 45,7 s | 48,3 s | 11,5 s |
+
+- O `zstd` reduz os dados da coleção em 32,7 % e o total em 10,2 %, porque os índices não mudam.
+- No MongoDB, o TTL não devolve espaço ao disco; só o `compact` o faz. No monolítico, o `DROP` liberta-o logo.
+- O CPU da carga não é comparado aqui: inclui os *healthchecks* do compose e a linha de base em repouso é curta demais (diário, `TODO(Diogo)`).
