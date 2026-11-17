@@ -94,6 +94,19 @@ internal sealed record ScenarioOptions
     /// <summary>Variant under test (spec §7): <c>hybrid</c> or <c>monolithic</c>. Only labels the CSV.</summary>
     public string Variant { get; init; } = "hybrid";
 
+    /// <summary>
+    /// Sensor time of offset 0 (Phase 10, retention scenario): ISO 8601 instant in the past. Null = the moment the run
+    /// starts (sensor time = real time, as in every scenario before Phase 10).
+    /// </summary>
+    public DateTimeOffset? SensorStart { get; init; }
+
+    /// <summary>
+    /// Sensor seconds per real second (Phase 10): with 100, a 1 000 s run covers 100 000 s of sensor time, so a load of
+    /// 10^6 events can span several past days. Only the timestamps change; the sending schedule and the rate stay real.
+    /// Default 1.
+    /// </summary>
+    public double TimeScale { get; init; } = 1;
+
     /// <summary>Print the event sequence as NDJSON instead of sending it (no HTTP).</summary>
     public bool DryRun { get; init; }
 
@@ -156,7 +169,14 @@ internal sealed record ScenarioOptions
     public string Describe()
     {
         var windows = string.Join('|', (PeakWindows ?? []).Select(w => string.Create(CultureInfo.InvariantCulture, $"{w.StartSeconds}+{w.DurationSeconds}")));
-        return string.Create(
+
+        // Phase 10, only when set: the ids of every earlier scenario stay as they were.
+        var sensorClock =
+            (SensorStart is { } start ? string.Create(CultureInfo.InvariantCulture, $";sensorStart={start.UtcDateTime:yyyy-MM-ddTHH:mm:ssZ}") : string.Empty) +
+            (TimeScale != 1 ? string.Create(CultureInfo.InvariantCulture, $";timeScale={TimeScale}") : string.Empty);
+        return sensorClock.Length == 0 ? Core() : Core() + sensorClock;
+
+        string Core() => string.Create(
             CultureInfo.InvariantCulture,
             $"name={Name};facilities={Facilities};spots={Spots};rate={Rate};peak={PeakFactor};windows={windows};duration={DurationSeconds};" +
             $"gen2={Gen2InitialRatio}->{Gen2Ratio}@{Gen2RampStartSeconds?.ToString(CultureInfo.InvariantCulture) ?? "none"}+{Gen2RampDurationSeconds};" +
@@ -192,6 +212,10 @@ internal sealed record ScenarioOptions
         Check(Concurrency >= 1, "concurrency must be at least 1.");
         Check(RequestTimeoutSeconds >= 1, "request-timeout must be at least 1.");
         Check(Run >= 1, "run must be at least 1.");
+        Check(TimeScale >= 1 && double.IsFinite(TimeScale), "time-scale must be at least 1 (two events of a spot stay >= 1 ms apart).");
+        Check(
+            SensorStart is null || SensorStart.Value.AddSeconds(DurationSeconds * TimeScale) <= DateTimeOffset.UtcNow.AddMinutes(1),
+            "sensor-start + duration × time-scale must not be in the future (the API refuses future timestamps).");
         Check(WaitReadModelSeconds >= 0, "wait-read-model must not be negative.");
         Check(Uri.TryCreate(Api, UriKind.Absolute, out _), "api must be an absolute URL.");
         Check(PeakWindows is not null, "peakWindows must be a list (use [] for none).");
@@ -280,8 +304,15 @@ internal sealed record ScenarioOptions
         "dry-run" => o with { DryRun = Flag(key, value) },
         "summary-csv" => o with { SummaryCsv = Text(key, value) },
         "variant" => o with { Variant = Text(key, value) },
+        "sensor-start" => o with { SensorStart = Instant(key, value) },
+        "time-scale" => o with { TimeScale = Number(key, value) },
         _ => throw new ArgumentException($"Unknown option '--{key}'."),
     };
+
+    private static DateTimeOffset Instant(string key, string? value) =>
+        DateTimeOffset.TryParse(Text(key, value), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var t)
+            ? t
+            : throw new ArgumentException($"Option '--{key}' needs an ISO 8601 instant (e.g. 2026-11-12T00:00:00Z).");
 
     private static string Text(string key, string? value) =>
         value ?? throw new ArgumentException($"Option '--{key}' needs a value.");
