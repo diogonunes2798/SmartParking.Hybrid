@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using MongoDB.Driver;
 using SmartParking.Application.Abstractions;
+using SmartParking.Application.Retention;
 using SmartParking.Infrastructure.Documents.OccupancyEvents;
 
 namespace SmartParking.Infrastructure.Documents;
@@ -37,13 +38,33 @@ public static class DependencyInjection
         services.AddSingleton<IMongoClient>(_ => new MongoClient(connectionString));
         services.AddSingleton(sp => sp.GetRequiredService<IMongoClient>().GetDatabase(databaseName));
 
+        var logOptions = new MongoEventLogOptions { BlockCompressor = configuration[BlockCompressorKey] is { Length: > 0 } c ? c : null };
+        logOptions.Validate();
+
         services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton(logOptions);
         services.AddSingleton<MongoOccupancyEventLog>();
         services.AddSingleton<IOccupancyEventLog>(sp => sp.GetRequiredService<MongoOccupancyEventLog>());
+
+        // Retention (RNF-05, Phase 10, ADR-0013): the TTL guard, the export of a day and the oldest-event lookup.
+        services.TryAddSingleton(_ => RetentionOptionsFrom(configuration));
+        services.AddSingleton<MongoRawEventRetention>();
+        services.AddSingleton<IRawEventRetentionStore>(sp => sp.GetRequiredService<MongoRawEventRetention>());
 
         services.AddHealthChecks()
             .AddMongoDb(name: HealthCheckName, tags: healthCheckTags, timeout: TimeSpan.FromSeconds(3));
 
         return services;
+    }
+
+    /// <summary>Configuration key of the block compressor of the events collection (Phase 10).</summary>
+    public const string BlockCompressorKey = "Mongo:EventsBlockCompressor";
+
+    /// <summary>The validated <c>Retention</c> section.</summary>
+    public static RetentionOptions RetentionOptionsFrom(IConfiguration configuration)
+    {
+        var options = configuration.GetSection(RetentionOptions.SectionName).Get<RetentionOptions>() ?? new RetentionOptions();
+        options.Validate();
+        return options;
     }
 }

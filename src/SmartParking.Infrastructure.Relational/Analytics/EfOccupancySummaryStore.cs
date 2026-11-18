@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using NpgsqlTypes;
 using SmartParking.Application.Analytics;
+using SmartParking.Infrastructure.Relational.Retention;
 
 namespace SmartParking.Infrastructure.Relational.Analytics;
 
@@ -44,7 +45,11 @@ internal sealed class EfOccupancySummaryStore(SmartParkingDbContext context) : I
         return checkpoint?.ToUniversalTime();
     }
 
-    public async Task<DateTimeOffset?> SaveAsync(IReadOnlyList<OccupancyHourlySummary> rows, DateTimeOffset? checkpoint, CancellationToken cancellationToken)
+    public async Task<DateTimeOffset?> SaveAsync(
+        IReadOnlyList<OccupancyHourlySummary> rows,
+        DateTimeOffset? checkpoint,
+        AggregatedRange? covered,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(rows);
         var transaction = await context.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
@@ -74,6 +79,37 @@ internal sealed class EfOccupancySummaryStore(SmartParkingDbContext context) : I
                         $"""
                          INSERT INTO analytics.aggregation_checkpoints (name, position) VALUES ({CheckpointName}, {position.ToUniversalTime()})
                          ON CONFLICT (name) DO UPDATE SET position = GREATEST(aggregation_checkpoints.position, EXCLUDED.position)
+                         """,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (covered is not null)
+            {
+                // Retention (Phase 10, ADR-0013). The purge horizon is read FOR SHARE: retention moves it with an upsert of
+                // the same row, so it cannot move until this transaction ends; a range that starts before it was read from
+                // a log that may have lost events and must not replace good rows (review of Phase 10, finding 4).
+                var from = covered.From.ToUniversalTime();
+                var to = covered.To.ToUniversalTime();
+                var horizon = await context.Database
+                    .SqlQuery<DateTimeOffset>(
+                        $"SELECT position AS \"Value\" FROM analytics.retention_positions WHERE name = {RetentionPositionRow.PurgeHorizon} FOR SHARE")
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                if (horizon.Count > 0 && from < horizon[0])
+                {
+                    throw new InvalidOperationException(
+                        $"The aggregated range starts at {from:O}, before the retention purge horizon {horizon[0].ToUniversalTime():O}: not saved.");
+                }
+
+                // Coverage: every hour of the range, with or without rows, with the instant the events were read from.
+                var aggregatedAt = covered.AggregatedAt.ToUniversalTime();
+                await context.Database.ExecuteSqlAsync(
+                        $"""
+                         INSERT INTO analytics.aggregated_hours (hour_start, aggregated_at)
+                         SELECT h, {aggregatedAt} FROM generate_series({from}, {to} - interval '1 hour', interval '1 hour') AS h
+                         ON CONFLICT (hour_start) DO UPDATE
+                         SET aggregated_at = GREATEST(aggregated_hours.aggregated_at, EXCLUDED.aggregated_at)
                          """,
                         cancellationToken)
                     .ConfigureAwait(false);

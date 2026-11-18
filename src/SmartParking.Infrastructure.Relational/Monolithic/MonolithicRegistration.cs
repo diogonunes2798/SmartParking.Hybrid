@@ -32,6 +32,8 @@ public static class MonolithicRegistration
         services.AddSingleton<IEventBus, PostgresEventBus>();
         services.AddSingleton<IAvailabilityQueries, PostgresAvailabilityQueries>();
         services.AddSingleton<OccupancyPartitionMaintenance>();
+        services.AddSingleton<MonolithicRawEventRetention>(); // retention by DROP of partitions (Phase 10, ADR-0013)
+        services.AddSingleton<Application.Retention.IRawEventRetentionStore>(sp => sp.GetRequiredService<MonolithicRawEventRetention>());
         return services;
     }
 }

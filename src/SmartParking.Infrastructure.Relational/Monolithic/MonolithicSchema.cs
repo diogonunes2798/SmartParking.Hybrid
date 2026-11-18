@@ -24,6 +24,13 @@ public static class MonolithicSchema
     /// </summary>
     public const string EnsurePartitionsFunction = Schema + ".ensure_occupancy_partitions";
 
+    /// <summary>
+    /// <c>monolith.ensure_occupancy_day_partitions(from_day date, days int)</c> (Phase 10, migration <c>AddRetention</c>): creates
+    /// the missing daily partitions <c>occupancy_events_dYYYYMMDD</c>; an empty monthly partition in the way is replaced by
+    /// the daily partitions of its whole month.
+    /// </summary>
+    public const string EnsureDayPartitionsFunction = Schema + ".ensure_occupancy_day_partitions";
+
     /// <summary>UC-05 columns added by <c>AddEnvironmentalColumns</c> (snake_case of the payload fields).</summary>
     public static IReadOnlyList<string> EnvironmentalColumns { get; } = ["temperature", "air_quality", "noise"];
 

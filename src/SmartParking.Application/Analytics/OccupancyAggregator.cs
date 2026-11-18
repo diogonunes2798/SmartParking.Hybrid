@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using SmartParking.Application.Abstractions;
 using SmartParking.Application.Diagnostics;
+using SmartParking.Application.Retention;
 using SmartParking.Domain.Occupancy;
 
 namespace SmartParking.Application.Analytics;
@@ -27,6 +28,7 @@ public sealed class OccupancyAggregator(
     IAnalyticsFacilitySource facilities,
     IOccupancyEventLog log,
     IOccupancySummaryStore store,
+    IRetentionLedger retention,
     AnalyticsOptions options,
     AnalyticsMetrics metrics,
     TimeProvider time)
@@ -55,6 +57,19 @@ public sealed class OccupancyAggregator(
         var maxEnd = from + (OccupancyIntervalCalculator.Hour * options.MaxHoursPerRun);
         var to = closedUntil < maxEnd ? closedUntil : maxEnd; // long backlog: catch up over several runs
 
+        // Never read hours whose events retention may have removed (Phase 10, ADR-0013): they would be aggregated again
+        // from an incomplete log and overwrite good rows. Normally far behind (30 days vs. a few hours).
+        if (await retention.GetPurgeHorizonAsync(cancellationToken).ConfigureAwait(false) is { } horizon
+            && from < OccupancyIntervalCalculator.CeilHour(horizon))
+        {
+            from = OccupancyIntervalCalculator.CeilHour(horizon);
+            if (from >= to)
+            {
+                metrics.Checkpoint(await store.SaveAsync([], to, null, cancellationToken).ConfigureAwait(false));
+                return AggregationReport.Nothing;
+            }
+        }
+
         return await AggregateSliceAsync(from, to, checkpoint: to, cancellationToken).ConfigureAwait(false);
     }
 
@@ -72,6 +87,14 @@ public sealed class OccupancyAggregator(
         {
             throw new ArgumentException(
                 string.Create(CultureInfo.InvariantCulture, $"The range must end at a closed hour (at most {closedUntil:O})."), nameof(to));
+        }
+
+        if (await retention.GetPurgeHorizonAsync(cancellationToken).ConfigureAwait(false) is { } horizon && from < horizon)
+        {
+            throw new ArgumentException(
+                string.Create(CultureInfo.InvariantCulture,
+                    $"The range starts before the retention purge horizon ({horizon:O}): those events may already be removed (ADR-0013)."),
+                nameof(from));
         }
 
         var stopwatch = Stopwatch.StartNew();
@@ -132,7 +155,7 @@ public sealed class OccupancyAggregator(
             }
         }
 
-        var stored = await store.SaveAsync(rows, checkpoint, cancellationToken).ConfigureAwait(false);
+        var stored = await store.SaveAsync(rows, checkpoint, new AggregatedRange(from, to, aggregatedAt), cancellationToken).ConfigureAwait(false);
 
         var report = new AggregationReport(from, to, snapshot.Count, Hours(from, to), rows.Count, events, stopwatch.Elapsed);
         metrics.Aggregated(report);

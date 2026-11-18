@@ -7,6 +7,7 @@ using SmartParking.Application.Abstractions;
 using SmartParking.Application.Analytics;
 using SmartParking.Application.Availability;
 using SmartParking.Application.Configuration;
+using SmartParking.Application.Retention;
 using SmartParking.Application.Sessions;
 using SmartParking.Domain.Facilities;
 using SmartParking.Domain.Sessions;
@@ -79,6 +80,11 @@ public static class DependencyInjection
         services.AddScoped<IConfigurationQueries, EfConfigurationQueries>();
         services.AddScoped<IAnalyticsFacilitySource, EfAnalyticsFacilitySource>(); // UC-04 aggregation (Phase 6, ADR-0010)
         services.AddScoped<IOccupancySummaryStore, EfOccupancySummaryStore>();
+
+        // Retention of the raw events (RNF-05, Phase 10, ADR-0013): coverage, archive manifest, positions and the spot
+        // state snapshot, in PostgreSQL for both variants.
+        services.AddScoped<IRetentionLedger, Retention.EfRetentionLedger>();
+        services.AddSingleton<ISpotStateSnapshotStore, Retention.NpgsqlSpotStateSnapshotStore>();
         services.AddScoped<IOccupancyReportQueries, EfOccupancyReportQueries>(); // reads analytics.* only
         services.AddScoped<IAvailabilitySource, EfAvailabilitySource>(); // read model rebuild (Phase 4, ADR-0008)
         services.AddScoped<ISessionQueries, EfSessionQueries>();

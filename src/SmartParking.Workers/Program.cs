@@ -2,6 +2,7 @@ using SmartParking.Application.Analytics;
 using SmartParking.Application.Availability;
 using SmartParking.Application.Ingestion;
 using SmartParking.Application.Outbox;
+using SmartParking.Application.Retention;
 using SmartParking.Infrastructure.Cache;
 using SmartParking.Infrastructure.Documents;
 using SmartParking.Infrastructure.Messaging;
@@ -12,6 +13,7 @@ using SmartParking.Workers.Analytics;
 using SmartParking.Workers.Monolithic;
 using SmartParking.Workers.Outbox;
 using SmartParking.Workers.ReadModel;
+using SmartParking.Workers.Retention;
 
 // `dotnet run --project src/SmartParking.Workers -- rebuild-read-model` rebuilds the availability read model from
 // PostgreSQL and MongoDB and exits (ADR-0008; benchmarks start from a known state). It may run while the Workers run:
@@ -22,7 +24,11 @@ const string RebuildCommand = "rebuild-read-model";
 // aggregates that range of whole UTC hours into the summary table and exits (UC-04, ADR-0010): backfills, and the
 // benchmarks of Phase 9. Safe while the Workers run (upsert); it does not move the worker's checkpoint.
 const string AggregateCommand = "aggregate-occupancy";
-var command = args.Length > 0 && args[0] is RebuildCommand or AggregateCommand ? args[0] : null;
+
+// `dotnet run --project src/SmartParking.Workers -- apply-retention` runs the retention once (archive, snapshot, purge
+// horizon, TTL guard or DROP of partitions) and exits (RNF-05, Phase 10, ADR-0013): the retention benchmark scenario.
+const string RetentionCommand = "apply-retention";
+var command = args.Length > 0 && args[0] is RebuildCommand or AggregateCommand or RetentionCommand ? args[0] : null;
 var rebuildOnly = command is not null;
 
 // The workers host is a (minimal) web host so that it exposes /health and /metrics like the API:
@@ -69,6 +75,10 @@ analytics.Validate();
 builder.Services.AddSingleton(analytics);
 builder.Services.AddSingleton<AnalyticsMetrics>();
 builder.Services.AddScoped<OccupancyAggregator>();
+
+// Retention of the raw events (RNF-05, Phase 10, ADR-0013), both variants. Settings: Retention (RawEvents, ArchiveDelay,
+// GuardMargin, ArchivePath, ...). Also wraps the event log so that aggregations and rebuilds read the spot state snapshot.
+builder.Services.AddRetention(builder.Configuration);
 
 if (!rebuildOnly && monolithic)
 {
@@ -134,6 +144,9 @@ if (!rebuildOnly)
     {
         builder.Services.AddHostedService<OccupancyAggregationService>();
     }
+
+    // Always registered: with Retention:Enabled=false it only sets the MongoDB TTL index back to «never» (fail closed).
+    builder.Services.AddHostedService<RetentionService>();
 }
 
 var app = builder.Build();
@@ -160,6 +173,20 @@ if (rebuildOnly)
                 Console.WriteLine(
                     $"Occupancy aggregated from {from:O} to {to:O}: {report.Facilities} facilities, {report.Hours} hours, " +
                     $"{report.Rows} rows, {report.Events} events in {report.Duration.TotalMilliseconds:F0} ms.");
+            }
+            else if (command == RetentionCommand)
+            {
+                var report = await scope.ServiceProvider.GetRequiredService<OccupancyRetention>().RunOnceAsync(cancel.Token);
+                Console.WriteLine(
+                    $"Retention applied: {report.DaysArchived} days archived ({report.EventsArchived} events), " +
+                    $"archived until {report.ArchivedUntil:O}, purge horizon {report.PurgeHorizon:O}, " +
+                    $"TTL {report.Enforcement?.ExpireAfterSeconds} s, partitions dropped: " +
+                    $"{string.Join(' ', report.Enforcement?.DroppedPartitions ?? [])}" +
+                    (report.Blocked is { } blocked ? $"; waiting: {blocked}." : "."));
+                if (report.Blocked is not null)
+                {
+                    Environment.ExitCode = 3; // the benchmark must know that retention did not reach its target
+                }
             }
             else
             {

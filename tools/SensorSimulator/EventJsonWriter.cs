@@ -20,21 +20,29 @@ internal static class EventJsonWriter
     /// <summary>Writes a JSON array with <paramref name="events"/>.</summary>
     /// <param name="runStart">Instant that corresponds to offset 0; the sensor timestamp is runStart + offset.</param>
     public static void WriteBatch(
-        Utf8JsonWriter writer, ReadOnlySpan<SimulatedEvent> events, Topology topology, DateTimeOffset runStart)
+        Utf8JsonWriter writer, ReadOnlySpan<SimulatedEvent> events, Topology topology, DateTimeOffset runStart) =>
+        WriteBatch(writer, events, topology, runStart, 1);
+
+    /// <param name="timeScale">Sensor seconds per real second (Phase 10): the timestamp is runStart + offset × scale.</param>
+    public static void WriteBatch(
+        Utf8JsonWriter writer, ReadOnlySpan<SimulatedEvent> events, Topology topology, DateTimeOffset runStart, double timeScale)
     {
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(topology);
         writer.WriteStartArray();
         foreach (ref readonly var e in events)
         {
-            WriteEvent(writer, e, topology, runStart);
+            WriteEvent(writer, e, topology, runStart, timeScale);
         }
 
         writer.WriteEndArray();
         writer.Flush();
     }
 
-    public static void WriteEvent(Utf8JsonWriter writer, in SimulatedEvent e, Topology topology, DateTimeOffset runStart)
+    public static void WriteEvent(Utf8JsonWriter writer, in SimulatedEvent e, Topology topology, DateTimeOffset runStart) =>
+        WriteEvent(writer, e, topology, runStart, 1);
+
+    public static void WriteEvent(Utf8JsonWriter writer, in SimulatedEvent e, Topology topology, DateTimeOffset runStart, double timeScale)
     {
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(topology);
@@ -44,10 +52,14 @@ internal static class EventJsonWriter
         writer.WriteString("spotId", topology.SpotIds[e.SpotIndex]);
         writer.WriteString("facilityId", topology.FacilityIds[e.FacilityIndex]);
         writer.WriteString("type", e.Type);
-        writer.WriteString("timestamp", runStart.AddTicks(e.OffsetTicks)); // ISO 8601 with offset (RF-01)
+        writer.WriteString("timestamp", SensorTime(runStart, e.OffsetTicks, timeScale)); // ISO 8601 with offset (RF-01)
         WritePayload(writer, e);
         writer.WriteEndObject();
     }
+
+    /// <summary>Sensor timestamp of an event: <paramref name="runStart"/> + offset × <paramref name="timeScale"/>.</summary>
+    public static DateTimeOffset SensorTime(DateTimeOffset runStart, long offsetTicks, double timeScale) =>
+        timeScale == 1 ? runStart.AddTicks(offsetTicks) : runStart.AddTicks((long)Math.Round(offsetTicks * timeScale));
 
     /// <summary>
     /// <c>payload</c>: the generation, plus the three environmental readings for generation 2 (UC-05). Decimal values

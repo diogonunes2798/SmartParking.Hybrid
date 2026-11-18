@@ -46,6 +46,8 @@ dotnet run --project src/SmartParking.Workers    # http://localhost:5090/health/
 dotnet run --project tools/SensorSimulator -- --facilities 2 --spots 50 --rate 5 --duration 60 --seed 42   # precisa da Api e dos Workers
 dotnet run --project tools/SensorSimulator -- --scenario bench/scenarios/d8-reference.json            # cenários em bench/scenarios (README do simulador)
 ./bench/run.sh <cenario> [--variant hybrid|monolithic] [--runs 5] [--warmup 60]   # results/<cenario>/<data>.csv (+ meta.json, k6.json); apaga os volumes (down -v); ver bench/README.md
+./bench/run.sh retention --variant hybrid --runs 5 --warmup 0   # RNF-05 (ADR-0013); RETENTION_COMPRESSOR=zstd para o zstd; --variant monolithic: partições diárias
+dotnet run --project src/SmartParking.Workers -- apply-retention   # uma execução da retenção (arquivo, fotografia, horizonte, TTL ou DROP)
 python -m unittest discover -s bench/tests   # testes dos scripts de medição
 ```
 

@@ -44,7 +44,7 @@ internal sealed class LoadRunner(HttpClient http, ScenarioOptions options, Topol
         // A sender that dies (unexpected exception) cancels the run instead of leaving the dispatcher blocked on a
         // full channel that nobody reads (review finding 4).
         using var failed = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var runStart = DateTimeOffset.UtcNow;
+        var runStart = options.SensorStart ?? DateTimeOffset.UtcNow; // Phase 10: a past sensor clock for the retention scenario
         _clock.Start();
         var senders = Enumerable.Range(0, options.Concurrency)
             .Select(_ => Task.Run(() => SendLoopGuardedAsync(channel.Reader, runStart, failed), CancellationToken.None))
@@ -171,7 +171,7 @@ internal sealed class LoadRunner(HttpClient http, ScenarioOptions options, Topol
             {
                 buffer.ResetWrittenCount();
                 writer.Reset(buffer);
-                EventJsonWriter.WriteBatch(writer, batch.Events, topology, runStart);
+                EventJsonWriter.WriteBatch(writer, batch.Events, topology, runStart, options.TimeScale);
                 _counters.RecordSent(batch.Events);
                 await SendAsync(buffer.WrittenMemory, batch.Count, batch.FirstOffsetTicks, ct);
             }

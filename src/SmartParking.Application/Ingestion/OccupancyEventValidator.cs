@@ -12,7 +12,8 @@ namespace SmartParking.Application.Ingestion;
 /// <item><c>eventId</c>, <c>sensorId</c>, <c>spotId</c>, <c>facilityId</c>: non-empty GUID strings;</item>
 /// <item><c>type</c>: exactly <c>OCCUPIED</c> or <c>FREED</c>;</item>
 /// <item><c>timestamp</c>: ISO 8601 with an explicit offset (<c>Z</c> or <c>±hh:mm</c>); a local time is ambiguous.
-/// Not later than the reception plus <see cref="IngestionSettings.MaxClockSkew"/> (Phase 4);</item>
+/// Not later than the reception plus <see cref="IngestionSettings.MaxClockSkew"/> (Phase 4), and not earlier than the
+/// reception minus <see cref="IngestionSettings.MaxEventAge"/> (Phase 10);</item>
 /// <item><c>payload</c>: a JSON object, or absent (stored as <c>{}</c>). Its content is not validated (UC-05).</item>
 /// </list>
 /// Other top-level properties are ignored: extension data belongs in <c>payload</c>.
@@ -29,7 +30,13 @@ public static partial class OccupancyEventValidator
 
     /// <param name="maxClockSkew">How far after <paramref name="receivedAt"/> the sensor timestamp may be.</param>
     public static OccupancyEventMessage? Validate(
-        JsonElement item, DateTimeOffset receivedAt, TimeSpan maxClockSkew, out IReadOnlyList<string> errors)
+        JsonElement item, DateTimeOffset receivedAt, TimeSpan maxClockSkew, out IReadOnlyList<string> errors) =>
+        Validate(item, receivedAt, maxClockSkew, new IngestionSettings().MaxEventAge, out errors);
+
+    /// <param name="maxClockSkew">How far after <paramref name="receivedAt"/> the sensor timestamp may be.</param>
+    /// <param name="maxEventAge">How far before <paramref name="receivedAt"/> the sensor timestamp may be (Phase 10).</param>
+    public static OccupancyEventMessage? Validate(
+        JsonElement item, DateTimeOffset receivedAt, TimeSpan maxClockSkew, TimeSpan maxEventAge, out IReadOnlyList<string> errors)
     {
         var problems = new List<string>();
         errors = problems;
@@ -52,6 +59,16 @@ public static partial class OccupancyEventValidator
             problems.Add(string.Create(
                 CultureInfo.InvariantCulture,
                 $"'timestamp' is more than {maxClockSkew.TotalSeconds:F0} s in the future (sensor clock ahead of the server)."));
+        }
+
+        if (timestamp != default && timestamp < receivedAt - maxEventAge)
+        {
+            // Retention (Phase 10, ADR-0013): such an event could land in a day already archived, or behind the purge
+            // horizon, and be removed without being aggregated or archived (or, in the monolithic variant, fall into
+            // DEFAULT where its daily partition was dropped).
+            problems.Add(string.Create(
+                CultureInfo.InvariantCulture,
+                $"'timestamp' is more than {maxEventAge.TotalHours:F0} h in the past (older than Ingestion:MaxEventAge)."));
         }
 
         return problems.Count == 0
