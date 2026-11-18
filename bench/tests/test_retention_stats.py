@@ -44,13 +44,26 @@ class RetentionStatsTests(unittest.TestCase):
 
     def test_hybrid_storage_rows_add_storage_and_indexes_and_list_each_index(self):
         stats = {"count": 10, "size": 1000, "storageSize": 400, "freeStorageSize": 50, "totalIndexSize": 300,
-                 "indexSizes": {"ux_eventId": 200, "_id_": 100}}
+                 "indexFreeStorageSize": 20, "indexSizes": {"ux_eventId": 200, "_id_": 100}}
         values = {m: v for m, v, _ in rs.hybrid_storage_rows("after_load", stats)}
         self.assertEqual(values["storage_after_load_total_bytes"], 700)
         self.assertEqual(values["storage_after_load_free_bytes"], 50)
-        self.assertEqual(values["storage_after_load_used_bytes"], 650)
+        self.assertEqual(values["storage_after_load_index_free_bytes"], 20)
+        self.assertEqual(values["storage_after_load_used_bytes"], 630)
         self.assertEqual(values["storage_after_load_index__id__bytes"], 100)
         self.assertEqual(values["storage_after_load_index_ux_eventId_bytes"], 200)
+
+    def test_hybrid_storage_rows_fail_loudly_without_the_free_space(self):
+        # Phase 10a: the mongosh stats() helper dropped freeStorageSize and a `|| 0` hid it as 0 (Phase 10b).
+        stats = {"count": 10, "size": 1000, "storageSize": 400, "totalIndexSize": 300, "indexFreeStorageSize": 0,
+                 "indexSizes": {}}
+        with self.assertRaises(KeyError):
+            rs.hybrid_storage_rows("after_load", stats)
+
+    def test_mongo_stats_use_collstats_and_never_default_the_free_space(self):
+        self.assertIn("$collStats", rs.MONGO_STATS_JS)
+        self.assertNotIn(".stats(", rs.MONGO_STATS_JS)
+        self.assertNotIn("|| 0", rs.MONGO_STATS_JS)
 
     def test_monolithic_storage_rows(self):
         values = {m: v for m, v, _ in rs.monolithic_storage_rows(
