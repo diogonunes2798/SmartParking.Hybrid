@@ -151,6 +151,16 @@ O `aggregated_at` usa o relógio do agregador e não o `now()` da BD, para se po
   9. **Retenção sem carga.** A retenção foi medida sem ingestão em simultâneo; a interferência nas inserções fica por medir (revisão, achado 16).
   10. **Prazos provisórios.** `RawEvents` (30 dias), `ArchiveDelay` (8 dias), `GuardMargin` (1 dia) e `MaxEventAge` (7 dias) são todos `TODO(Diogo)`.
   11. **Formatos de arquivo diferentes.** As duas variantes não usam o mesmo formato, e o tamanho do arquivo não é comparável byte a byte.
+  12. ***Stream* Redis e outbox fora da retenção** (revisão final da 10b, achado 2):
+      - o *stream* (`XADD` sem `MAXLEN`) e a tabela `outbox_messages` nunca são aparados nem purgados;
+      - o espaço do *stream*, uma cópia de cada evento na memória do Redis, não entra na medição, o que favorece o híbrido na comparação de espaço;
+      - `TODO(Diogo)`: implementar o aparo e a purga, ou manter como limitação declarada.
+  13. **Componentes parados no monolítico.** O `mongo` e o `redis` continuam a correr e competem pelo CPU da máquina, embora não sejam somados (revisão final, achado 15).
+  14. **Medições da 10a corrigidas na 10b:**
+      - as linhas `_free_bytes` e `_used_bytes` do híbrido nos CSV de 17-11-2026 são inválidas (o *helper* `stats()` do `mongosh` não devolvia `freeStorageSize`, e o valor ficava 0);
+      - o CPU da carga incluía os *healthchecks*.
+
+      A leitura passou para `$collStats`, e o `bench/compose.bench.yml` tira os *healthchecks* das janelas (diário da 10b).
 - **Ponto de extensão:** `IRawEventRetentionStore`, `IRetentionLedger`, `ISpotStateSnapshotStore` e `IEventArchive` (Application).
 
 ## Medição
@@ -161,7 +171,7 @@ Cenário `retention` (`bench/scenarios/retention.sh`, `bench/README.md`), com 5 
 - monolítico com partições diárias.
 
 Cada execução tem cinco passos:
-1. **Repouso.** CPU durante 30 s, sem carga.
+1. **Repouso.** CPU durante 30 s, sem carga. A partir da 10b, 120 s, com os *healthchecks* fora das janelas (`bench/compose.bench.yml`).
 2. **Carga.** Cerca de 10⁶ eventos pela API, a 500/s, com o tempo dos sensores comprimido em 4 dias UTC passados.
 3. **Agregação** desses dias.
 4. **Retenção.** Os Workers são reiniciados com a retenção ligada e removem a primeira metade dos dias.
@@ -185,4 +195,8 @@ Cada execução tem cinco passos:
 
 - O `zstd` reduz os dados da coleção em 32,7 % e o total em 10,2 %, porque os índices não mudam.
 - No MongoDB, o TTL não devolve espaço ao disco; só o `compact` o faz. No monolítico, o `DROP` liberta-o logo.
-- O CPU da carga não é comparado aqui: inclui os *healthchecks* do compose e a linha de base em repouso é curta demais (diário, `TODO(Diogo)`).
+- O CPU da carga não é comparado aqui: inclui os *healthchecks* do compose, e a linha de base em repouso é curta demais.
+  - **Decisão da 10b:** opção A. Os *healthchecks* só correm no arranque e depois de hora a hora (`bench/compose.bench.yml`), e o repouso passa a 120 s.
+  - **Medido em repouso:** o `mongo` desce de 0,145 para 0,0045 s de CPU por segundo.
+  - Os números comparáveis exigem repetir as sessões (`TODO(Diogo)`).
+- **Espaço livre.** As linhas `_free_bytes` e `_used_bytes` do híbrido nestes CSV são inválidas (sempre 0; limitação 14). Os valores de `_total_bytes` e os de depois do `compact` estão certos.

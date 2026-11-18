@@ -1619,3 +1619,165 @@ Em todas as execuções:
 - Investigar o `freeStorageSize` = 0 depois do TTL, antes de usar `storage_*_used_bytes` na tese.
 - Teste por estabilizar: `Latency_histogram_uses_fine_buckets_around_the_200_ms_target`.
 - Fechar a rastreabilidade de todos os requisitos e fazer o resumo das 10 fases (passo 7 do guião).
+
+## 18-11-2026 — Sessão 10b: revisão final, rastreabilidade e resumo das 10 fases
+
+Objetivo: fechar a Fase 10 com os passos 6 e 7 do guião. Isso inclui:
+- a revisão final de toda a solução e o fecho da rastreabilidade;
+- o resumo das 10 fases;
+- os dois pontos deixados pela 10a: o método de medição do CPU da carga e o `freeStorageSize` = 0.
+
+Ramo `phase-10b-final-review`.
+
+### Plano e decisões
+
+- O plano foi apresentado antes de qualquer código. Antes de o escrever, investiguei os dois pontos só em modo de leitura, numa base de dados descartável.
+- **Decisão do Diogo:** o CPU da carga mede-se com a **opção A**: um *override* do compose só para o *bench*, com os *healthchecks* fora das janelas, e um repouso de 120 s. A opção B (manter os *healthchecks* e alongar o repouso) foi posta de parte: o repouso continuaria a ser extrapolado cerca de 7 vezes e o ruído ficaria nos valores em bruto.
+- **`TODO(Diogo)`, por responder no fim da sessão:** repetir ou não as três sessões do `retention` (cerca de 9 h) com as correções.
+
+### Causa do `freeStorageSize` = 0 (confirmada)
+
+**Ensaio numa base de dados descartável** (`mongo:7.0.48`, 200 000 documentos, metade apagada, dois `fsync`):
+
+| Leitura | `freeStorageSize` |
+|---|---|
+| `db.c.stats({freeStorage: 1})`, o *helper* do `mongosh` usado na 10a | **o campo não vem** |
+| `db.runCommand({collStats})` | 6 004 736 B |
+| `$collStats: {storageStats: {}}` | 6 004 736 B |
+| WiredTiger, `file bytes available for reuse` | 6 004 736 B |
+
+**Causa:**
+- o *helper* do `mongosh` não devolve o campo;
+- o `s.freeStorageSize || 0` do `retention_stats.py` transformava a falta em 0, sem erro;
+- no 7.0, a opção `freeStorage` nem existe no comando `collStats` (o servidor responde «unknown field»): só existe no `dbStats`;
+- os `fsync` da 10a não tinham culpa.
+
+**Consequência:** nos CSV da 10a (`results/retention/2026-11-17_1236.csv` e `_1540.csv`), as linhas `storage_*_free_bytes` e `storage_*_used_bytes` do híbrido são **inválidas**. As linhas `_storage_bytes`, `_index_bytes`, `_total_bytes` e as de depois do `compact` estão certas. O monolítico não é afetado. Os CSV não foram apagados; a anotação está no `bench/README.md` e no ADR-0013.
+
+**Correção:**
+- leitura por `$collStats`;
+- campos obrigatórios (um `KeyError` em vez de 0);
+- linha nova `_index_free_bytes` (a soma de `file bytes available for reuse` de cada índice, porque o `storageStats` não tem `indexFreeStorageSize`);
+- 2 testes novos em `bench/tests`.
+
+### O que foi feito
+
+- **`bench/compose.bench.yml`** (novo), que o `run.sh` passa a usar sempre (`COMPOSE_FILE`; o `COMPOSE_PATH_SEPARATOR=:` é explícito porque no Windows o separador por omissão é `;`):
+  - os *healthchecks* mantêm os comandos, mas correm de 1 em 1 s só durante o arranque (`start_period` 300 s, `start_interval` 1 s), e depois de hora a hora. O `up -d --wait` continua a funcionar;
+  - serviços cliente `mongo-client` e `postgres-client` (`extends` dos motores, sem volume, sem porta e sem *healthcheck*) para as contagens e o `compact`. Um `run` do próprio serviço herdaria o *healthcheck* de 1 em 1 s (revisão final, achado 8).
+- **`run.sh`:**
+  - recusa um Docker Engine anterior ao 25 (sem `start_interval`, o `up --wait` ficaria bloqueado 1 h);
+  - escreve `healthcheck=bench-1h` na coluna `configuracao`.
+- **`write_meta.py`:** o `meta.json` regista também `COMPOSE_*` e `RETENTION_*`.
+- **`retention.sh`:** repouso de 120 s (`RETENTION_IDLE_SECONDS`).
+- **`retention_stats.py`:** chave `engine_compressor=` para o compressor lido no motor (antes havia `compressor=` duas vezes, achado 14).
+- **Teste instável** `Latency_histogram_uses_fine_buckets_around_the_200_ms_target`. Há duas causas possíveis:
+  - o pedido só entra no histograma depois de a resposta terminar;
+  - o exportador Prometheus guarda o *scrape* em cache durante pouco tempo.
+
+  O teste (e o `Metrics_endpoint_…`, com a mesma corrida) passa a repetir o *scrape* até 5 s, até a série aparecer.
+- **Documentação:**
+  - `docs/revisoes/fase-10b-revisao-final.md`;
+  - RASTREABILIDADE (estado real de cada requisito);
+  - ADR-0013, `bench/README.md` e CLAUDE.md (estrutura sem `baseline/`, projeto de testes do simulador, aviso no `apply-retention`);
+  - `.gitignore` (`src/**/archive/`).
+
+### Verificação ao vivo do *override* (repouso, 120 s, sem carga)
+
+CPU por segundo do cgroup de cada contentor:
+
+| Contentor | Compose por omissão | Com `compose.bench.yml` |
+|---|---|---|
+| `mongo` | 0,145 s/s | 0,0045 s/s |
+| `postgres` | 0,0077 s/s | 0,0010 s/s |
+| `redis` | 0,0089 s/s | 0,0039 s/s |
+
+- Repeti a medição sem o *override*: deu 0,147 e 0,145 s/s no `mongo`.
+- Numa janela de carga de cerca de 2 000 s, isto corresponde a cerca de 290 s de CPU do `mongo` devidos só ao *healthcheck*, contra cerca de 9 s com o *override*. Confirma a estimativa da 10a (cerca de 280 s dos cerca de 340 s brutos). Continua a ser uma estimativa a partir do repouso, não uma medição sob carga.
+- Durante a janela não correu nenhum *healthcheck* (o registo de saúde ficou com 1 entrada).
+- Arranque com `up -d --wait`: 3,9 a 7,7 s.
+- A contagem pelo `mongo-client` e o `SELECT 1` pelo `postgres-client` funcionaram.
+- A leitura nova deu, numa coleção temporária com 50 000 documentos restantes: `free` 2 117 632 B em 4 591 616 B, mais 1 101 824 B livres nos índices. A coleção e a base de dados temporárias foram apagadas no fim.
+
+### Problemas encontrados e tentativas falhadas
+
+- **Sétima ocorrência do `python -` no Git Bash.** Enviei um comando «de preenchimento» (`python - < /dev/null`), sem qualquer utilidade. Ficou pendurado 2 min, mesmo com o `stdin` redirecionado, e foi parado com `TaskStop`. A memória foi atualizada: nunca enviar comandos de preenchimento.
+- **Primeira validação: falhou porque a base de dados de desenvolvimento estava vazia.** Não havia `occupancy_events`. A leitura nova falhou com erro, como devia, em vez de dar 0. A validação passou a criar uma coleção temporária.
+- **`indexFreeStorageSize` não existe no `$collStats`.** Só existe no `dbStats`. A segunda validação deu `None` e partiu no cálculo. Esta falha confirma o achado 6 da revisão, recebida pouco depois. Passou a somar o espaço livre de cada índice a partir de `indexDetails`.
+- **Editei o `compose.bench.yml` enquanto a validação corria.** A terceira validação partiu a meio. O caminho de `extends.file` resolve-se a partir da pasta do projeto, não da pasta do *override*, e `../docker-compose.yml` apontava para `C:\docker-compose.yml`. É a mesma lição do `run.sh` (memória «bench-sessoes»): não alterar o que uma medição em curso está a usar.
+- **Dois processos `python.exe` vivos** depois do `TaskStop`. Não os terminei, porque não consegui confirmar que eram meus (o servidor MCP de pesquisa também corre em Python).
+
+### Verificação (resultados reais)
+
+- `dotnet build`: 0 avisos, 0 erros.
+- `dotnet test` (híbrido): **287 testes, 287 passam**.
+- `Persistence__Mode=Monolithic dotnet test`: **284 testes: 245 passam, 39 ignorados (só do híbrido), 0 falhas**.
+- `python -m unittest discover -s bench/tests`: 24 testes, OK (22 da 10a + 2 novos).
+- `bash -n` sobre `bench/run.sh` e `bench/scenarios/retention.sh`: sem erros.
+- Validação ao vivo do *override*, dos clientes e da leitura nova: secção acima.
+- **Não verificado nesta sessão:** uma execução completa de `./bench/run.sh retention` com as alterações (nem sequer um piloto). Antes da próxima sessão oficial, correr um piloto curto (`RETENTION_EVENTS=20000 --runs 1`) e ver a primeira execução (memória «bench-sessoes»).
+
+### Revisão final (passo 6)
+
+`docs/revisoes/fase-10b-revisao-final.md`: subagente geral, só de leitura, sobre toda a solução. Encontrou 20 achados: 2 altos, 5 médios, 1 baixo-médio, 8 baixos e 4 informativos. O tratamento está no fim desse ficheiro.
+
+As duas conclusões que mais pesam para a tese:
+1. **Só um dos seis cenários da §6 foi medido** (`retention`). `availability-read`, `session-payment`, `ingest-scale`, `failover` e a medição oficial do `schema-evolution` nunca correram. Os RNF-01 a RNF-04 e a comparação 6.5 sob carga dependem de uma Fase 9b que ainda não existe.
+2. **O RNF-05 estava marcado como «Concluído», mas é parcial.** O *stream* Redis (`XADD` sem `MAXLEN`) e a outbox nunca são aparados nem purgados, e o espaço do *stream* não é medido. Isso favorece o híbrido na comparação de espaço. A RASTREABILIDADE passou para «Parcial».
+
+### Resumo das 10 fases (passo 7)
+
+| Fase | Data | Entregou | Requisitos | ADR | PR |
+|---|---|---|---|---|---|
+| 1 | 14-11 | Solução em camadas, compose fixado por *digest*, *health checks*, OpenTelemetry, regra de dependências | transversais | 0001, 0002 | — |
+| 2a | 14-11 | Domínio, EF Core, migrações, CRUD de configuração, auditoria | RF-06, RNF-06 (parcial) | 0003 | #1 |
+| 2b | 15-11 | Sessões e pagamento com concorrência otimista e outbox na mesma transação | UC-02, RF-02 | 0004, 0005 (D1) | #2 |
+| 3 | 15-11 | Ingestão em lote, Redis Streams como *bus*, log *append-only* no MongoDB, idempotência | UC-01, RF-01 | 0006 (D2), 0007 (D3) | #3 |
+| 4 | 15-11 | *Read model* de disponibilidade em Redis (GEO, hashes), reconstrução | UC-03, RF-03 | 0008 | #4 |
+| 5 | 16-11 | *Relay* da outbox (`SKIP LOCKED`) e medição da janela de consistência; latência D7 | UC-02 (propagação), RNF-01 (instrumentação) | 0009 | #5 |
+| 6 | 16-11 | Tabelas de resumo e relatório de ocupação isolado das tabelas operacionais | UC-04, RF-05 | 0010 (D4) | #6 |
+| 7 | 16-11 | Simulador reprodutível; geração 2 de sensores sem paragem | UC-05, RNF-04 (piloto) | 0011 | #7 |
+| 8 | 16-11 | Variante monolítica só PostgreSQL (eventos particionados, disponibilidade por consulta, UC-05 por migração) | §7, Cap. 6.5 | 0012 | #9 |
+| 9a | 16-11 | Infraestrutura de medição: um comando por cenário, CSV da §6, `meta.json`, k6 (D6); só o cenário `smoke` | §6 (infraestrutura) | — | #10 |
+| 10a | 17-11 | Retenção (TTL com guarda e arquivo; `DROP` de partições), `snappy` vs `zstd`, cenário `retention` com 3×5 execuções | RNF-05 (parcial) | 0013 | #11 |
+| 10b | 18-11 | Revisão final, medição do CPU sem *healthchecks*, leitura certa do espaço livre, rastreabilidade final | — | — | — |
+
+**O que ficou demonstrado:**
+- a arquitetura do Cap. 4 corre de ponta a ponta nas duas variantes, com a mesma API (`Persistence:Mode`);
+- a alteração de esquema do UC-05 entra sem paragem no híbrido (piloto);
+- a retenção reduz o espaço de forma mensurável nas duas variantes:
+  - no MongoDB, só depois do `compact`;
+  - no PostgreSQL, logo com o `DROP`.
+
+**O que falta para os Cap. 5 e 6:**
+- os cinco cenários da §6 ainda por correr (Fase 9b);
+- a decisão sobre o *stream* e a outbox no RNF-05;
+- os pontos em aberto abaixo.
+
+**Lições transversais** (matéria-prima do Cap. 5):
+1. **Revisões independentes antes da aceitação.** Em três ocasiões (9a e duas vezes na 10a), a revisão chegou durante uma sessão oficial de medição e obrigou a deitá-la fora.
+2. **Os pilotos pequenos escondem efeitos de densidade.** O minuto de arredondamento do TTL só falhou com 10⁶ eventos.
+3. **Valores por omissão silenciosos nos *scripts* de medição** (`|| 0`) produzem dados plausíveis e errados. Um campo em falta tem de dar erro.
+4. **O ruído de fundo dos contentores** (*healthchecks*) pode dominar a medição de CPU de um motor.
+5. **Disciplina com as ferramentas:**
+   - o `TaskStop` deixa processos órfãos;
+   - os *heredocs* e o `python -` no Git Bash falharam sete vezes;
+   - não se pode editar um ficheiro que uma medição em curso está a usar.
+
+### Pontos em aberto para o Diogo
+
+**Decisões novas, levantadas pela revisão final:**
+1. Repetir as três sessões do `retention` com as correções (cerca de 9 h)? Sem isso, o espaço livre e o CPU da carga da 10a não servem para a tese.
+2. O *stream* Redis e a outbox: implementar o aparo e a purga (com medição da memória do *stream*), ou declarar a exclusão como limitação do RNF-05? (achado 2)
+3. A retenção e a agregação ficam ligadas ou desligadas nos cenários de desempenho (`appsettings.Benchmark.json`)? No monolítico, a retenção faz `min("timestamp")` sem índice, a cada minuto. (achado 4)
+4. A janela de consistência do UC-02: medir só até ao *bus*, ou criar um consumidor dos eventos de sessão? (achado 7)
+5. Existe o RF-04 no Cap. 3? (achado 12)
+6. O *record* `Domain/Occupancy/OccupancyEvent`, que não é usado: remover, ou manter como modelo conceptual? (achado 13)
+7. No monolítico, o `mongo` e o `redis` continuam a correr durante a medição: arrancar só o `postgres`? (achado 15)
+
+**Pontos já em aberto** (a lista completa, com ficheiros e linhas, está em `docs/revisoes/fase-10b-revisao-final.md`, na secção «Lista de `TODO(Diogo)`»):
+- as decisões D1 (sessões em NoSQL), D2 (Kafka), D4 (definição da taxa), D7 (valor único) e a confirmação da D8 na especificação;
+- as regras de domínio (tarifário, `VehicleType`, aceitação parcial, `MaxClockSkew`, raio máximo, lugar sem leitura);
+- os prazos de retenção (`RawEvents`, `ArchiveDelay`, `GuardMargin`, `MaxEventAge`);
+- o *pool* da API monolítica como ameaça à validade;
+- as referências bibliográficas por inserir nos ADR-0004, 0006 e 0007.
