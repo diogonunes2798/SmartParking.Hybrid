@@ -54,7 +54,7 @@ public sealed class HealthAndTelemetryTests(ApiFixture fixture) : IClassFixture<
         // Generate at least one measured request before scraping (health/metrics are not measured).
         (await _client.GetAsync("/openapi/v1.json", Ct)).EnsureSuccessStatusCode();
 
-        var text = await ScrapeAsync();
+        var text = await ScrapeUntilAsync("http_route=\"/openapi/{documentName}.json\"");
 
         Assert.Contains("http_server_request_duration_seconds", text, StringComparison.Ordinal);
         Assert.Contains("http_route=\"/openapi/{documentName}.json\"", text, StringComparison.Ordinal);
@@ -84,7 +84,7 @@ public sealed class HealthAndTelemetryTests(ApiFixture fixture) : IClassFixture<
     {
         (await _client.GetAsync("/openapi/v1.json", Ct)).EnsureSuccessStatusCode();
 
-        var text = await ScrapeAsync();
+        var text = await ScrapeUntilAsync("http_server_request_duration_seconds_bucket{");
 
         // Boundaries that do not exist in the default HTTP buckets (see ServiceDefaultsExtensions).
         Assert.Contains("http_server_request_duration_seconds_bucket{", text, StringComparison.Ordinal);
@@ -97,5 +97,25 @@ public sealed class HealthAndTelemetryTests(ApiFixture fixture) : IClassFixture<
         var response = await _client.GetAsync("/metrics", Ct);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.Content.ReadAsStringAsync(Ct);
+    }
+
+    /// <summary>
+    /// Scrapes until <paramref name="expected"/> appears (at most 5 s). A request is recorded in the histogram only once
+    /// its response has completed, and the Prometheus exporter caches a scrape for a short time, so a scrape right after
+    /// the request could miss it: this test failed once in a full run (Phase 10a diary) and passed in isolation.
+    /// </summary>
+    private async Task<string> ScrapeUntilAsync(string expected)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (true)
+        {
+            var text = await ScrapeAsync();
+            if (text.Contains(expected, StringComparison.Ordinal) || DateTime.UtcNow >= deadline)
+            {
+                return text;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(200), Ct);
+        }
     }
 }
