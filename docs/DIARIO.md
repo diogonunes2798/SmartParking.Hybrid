@@ -1717,6 +1717,28 @@ CPU por segundo do cgroup de cada contentor:
 - Validação ao vivo do *override*, dos clientes e da leitura nova: secção acima.
 - **Não verificado nesta sessão:** uma execução completa de `./bench/run.sh retention` com as alterações (nem sequer um piloto). Antes da próxima sessão oficial, correr um piloto curto (`RETENTION_EVENTS=20000 --runs 1`) e ver a primeira execução (memória «bench-sessoes»).
 
+### Piloto antes das sessões oficiais (18-11-2026, 14:58–15:09)
+
+O Diogo decidiu repetir as três sessões do `retention`. Antes delas corri um piloto curto, com o *commit* `4edb194` e a árvore limpa:
+- `RETENTION_EVENTS=20000 ./bench/run.sh retention --variant hybrid --runs 1 --warmup 0`
+- o mesmo comando com `--variant monolithic`
+
+As duas execuções terminaram com código de saída 0. Os ficheiros foram retirados de `results/`, porque o piloto não é uma medição oficial.
+
+- **Espaço livre no híbrido, agora com valores reais:**
+  - depois da carga: `free` 1 196 032 B e `index_free` 1 490 944 B;
+  - depois da retenção: `free` 2 469 888 B, e o `used_bytes` desce de 4 349 952 para 2 334 720 B, embora o `total_bytes` suba de 7 036 928 para 7 389 184 B;
+  - depois do `compact`: o `total_bytes` desce para 4 763 648 B e o `used_bytes` fica igual (2 334 720 B).
+
+  É a coerência esperada: o `compact` só devolve ao disco o espaço que já estava livre.
+- **Repouso de 120 s:** o `mongo` gastou 0,629 s, ou seja, 0,0052 s/s. Na 10a, com os *healthchecks*, eram cerca de 4 a 5 s por 30 s.
+  - O `postgres` gastou 1,3 s (0,011 s/s), mais do que na validação sem a API (0,001 s/s): a API e os Workers estão ligados e fazem *polling*.
+  - Com só 40 s de carga, o líquido do `postgres` no híbrido ainda dá ligeiramente negativo (−0,1 s). Com a carga completa (2 000 s), o peso relativo deste ruído é muito menor. Fica por confirmar na sessão oficial.
+- **Contagens e `compact` pelos serviços cliente:** funcionaram nas duas variantes.
+  - Híbrido: 10 004 removidos de 10 022 elegíveis (a margem da guarda).
+  - Monolítico: 10 022 removidos de 10 022.
+- **Configuração e `meta.json`:** a coluna `configuracao` tem `healthcheck=bench-1h` e `engine_compressor=snappy`, e o `meta.json` regista o `COMPOSE_FILE`.
+
 ### Revisão final (passo 6)
 
 `docs/revisoes/fase-10b-revisao-final.md`: subagente geral, só de leitura, sobre toda a solução. Encontrou 20 achados: 2 altos, 5 médios, 1 baixo-médio, 8 baixos e 4 informativos. O tratamento está no fim desse ficheiro.
