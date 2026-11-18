@@ -47,7 +47,7 @@ dotnet run --project tools/SensorSimulator -- --facilities 2 --spots 50 --rate 5
 dotnet run --project tools/SensorSimulator -- --scenario bench/scenarios/d8-reference.json            # cenários em bench/scenarios (README do simulador)
 ./bench/run.sh <cenario> [--variant hybrid|monolithic] [--runs 5] [--warmup 60]   # results/<cenario>/<data>.csv (+ meta.json, k6.json); apaga os volumes (down -v); ver bench/README.md
 ./bench/run.sh retention --variant hybrid --runs 5 --warmup 0   # RNF-05 (ADR-0013); RETENTION_COMPRESSOR=zstd para o zstd; --variant monolithic: partições diárias
-dotnet run --project src/SmartParking.Workers -- apply-retention   # uma execução da retenção (arquivo, fotografia, horizonte, TTL ou DROP)
+dotnet run --project src/SmartParking.Workers -- apply-retention   # uma execução da retenção (arquivo, fotografia, horizonte, TTL ou DROP); no híbrido a guarda do TTL só é refrescada enquanto o serviço de retenção corre (diário da Fase 10a, piloto 1)
 python -m unittest discover -s bench/tests   # testes dos scripts de medição
 ```
 
@@ -67,11 +67,13 @@ src/
 tests/
   SmartParking.ArchitectureTests/       regra de dependências (NetArchTest)
   SmartParking.Api.IntegrationTests/    WebApplicationFactory + Testcontainers (PostgreSQL, MongoDB, Redis)
+  SmartParking.SensorSimulator.Tests/   testes do simulador (UC-05)
 infra/                            configuração de serviços auxiliares (Prometheus)
 tools/
   SensorSimulator/                gerador de eventos de sensores (UC-01, UC-05)
 bench/                            cenários de carga e scripts de medição
-baseline/                         variante monolítica para comparação (Cap. 6.5)
+(variante monolítica, Cap. 6.5: não há pasta baseline/; é Persistence:Mode=Monolithic, com o código em
+ src/SmartParking.Infrastructure.Relational/Monolithic/ — ADR-0012)
 docs/                             especificação, rastreabilidade, decisões (ADR)
 results/                          resultados das experiências (CSV) — versionados
 ```
