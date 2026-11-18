@@ -30,12 +30,21 @@
 #   - only the components of the variant are summed (monolithic: postgres, api, workers; mongo and redis still run, idle),
 #     and every CPU window also has net rows (minus the idle rate x the window length);
 #   - each run records the clock skew of the mongo container (the TTL monitor uses it) and whether it crossed midnight UTC.
+#
+# Changes of Phase 10b (18-11-2026; docs/revisoes/fase-10b-revisao-final.md):
+#   - run.sh uses bench/compose.bench.yml: the healthchecks run at start-up only, then hourly (out of the CPU windows);
+#   - the counts and the compact use the client services mongo-client / postgres-client of that override (no healthcheck);
+#   - the idle window is 120 s (was 30 s);
+#   - the free space is read with $collStats (the mongosh stats() helper did not return freeStorageSize: 10a read 0).
 
 RETENTION_EVENTS=${RETENTION_EVENTS:-1000000}
 RETENTION_RATE=${RETENTION_RATE:-500}
 RETENTION_DAYS=${RETENTION_DAYS:-4}
 RETENTION_COMPRESSOR=${RETENTION_COMPRESSOR:-}
-RETENTION_IDLE_SECONDS=${RETENTION_IDLE_SECONDS:-30}
+# 120 s (Phase 10b, was 30 s): the idle rate is extrapolated over the load window (~2 000 s); at 30 s (x67) the net
+# load rows were not usable (negative for postgres). With the healthchecks out of the windows (bench/compose.bench.yml)
+# the idle rate is also much lower and steadier.
+RETENTION_IDLE_SECONDS=${RETENTION_IDLE_SECONDS:-120}
 RETENTION_POLL_SECONDS=${RETENTION_POLL_SECONDS:-15}
 RETENTION_TTL_WAIT=${RETENTION_TTL_WAIT:-1800}
 RETENTION_INTERVAL_SECONDS=${RETENTION_INTERVAL_SECONDS:-15}
@@ -232,7 +241,7 @@ scenario_run() {
   if [[ "$VARIANT" == hybrid ]]; then
     cpu_snapshot "$c5"
     started=$SECONDS
-    docker compose run --rm --no-deps -T mongo mongosh \
+    docker compose run --rm --no-deps -T mongo-client mongosh \
       "mongodb://${MONGO_USER:-smartparking}:${MONGO_PASSWORD:-smartparking}@mongo:27017/smartparking?authSource=admin" \
       --quiet --eval "printjson(db.runCommand({compact: 'occupancy_events'}))" >> "$LOGS/compact.run$run.log" 2>&1 < /dev/null
     cpu_snapshot "$c6"

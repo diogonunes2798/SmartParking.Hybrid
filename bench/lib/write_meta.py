@@ -65,13 +65,14 @@ def memory_bytes():
         return None
 
 
-ENV_PREFIXES = ("ASPNETCORE_", "DOTNET_", "OTEL_", "SMOKE_", "BENCH_")
+# COMPOSE_ (Phase 10b): COMPOSE_FILE names the bench override in use. RETENTION_: the overrides of the retention scenario.
+ENV_PREFIXES = ("ASPNETCORE_", "DOTNET_", "OTEL_", "SMOKE_", "BENCH_", "COMPOSE_", "RETENTION_")
 SECRET_MARKERS = ("CONNECTIONSTRINGS", "PASSWORD", "SECRET", "TOKEN", "KEY")
 
 
 def relevant_environment():
     """Inherited variables that reach the API, the Workers or a scenario and change their behaviour (review of Phase
-    9a, #7): ASPNETCORE_*, DOTNET_*, OTEL_*, the scenario overrides (SMOKE_*, BENCH_*) and any configuration override
+    9a, #7): ASPNETCORE_*, DOTNET_*, OTEL_*, COMPOSE_*, the scenario overrides (SMOKE_*, BENCH_*, RETENTION_*) and any configuration override
     (a name with "__", e.g. Persistence__Mode). Values that may hold credentials are recorded only as "<set>"."""
     found = {}
     for key, value in os.environ.items():
