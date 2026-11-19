@@ -59,5 +59,9 @@ nunit-*.xml
 # Phase 9a: process output of bench/run.sh (the CSV, meta.json and k6 summaries next to it are versioned)
 results/**/*.logs/
 
+# Phase 10b: event archive of the retention service when Retention:ArchivePath is relative (dotnet run writes it under
+# src/SmartParking.Workers/archive/; the bench writes it inside results/**/*.logs/)
+src/**/archive/
+
 # Python bytecode of the bench scripts
 __pycache__/

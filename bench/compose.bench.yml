@@ -1,0 +1,47 @@
+# Compose override used by bench/run.sh only (COMPOSE_FILE=docker-compose.yml:bench/compose.bench.yml). Phase 10b.
+#
+# Why: the healthchecks of docker-compose.yml run every 5 s inside each database container, so their CPU is counted
+# in that container's cgroup. For mongo this is a mongosh (Node.js) process, about 4-5 s of CPU per 30 s at rest
+# (Phase 10 pilots), which dominated the raw CPU of the mongo container in the 2 000 s load window of the retention
+# scenario (docs/DIARIO.md, Phase 10a; ADR-0013).
+#
+# How: only the timing changes; the test commands stay those of docker-compose.yml. While the container starts
+# (start_period) the check runs every second (start_interval, Docker Engine >= 25), so `docker compose up -d --wait`
+# still returns as soon as the service is healthy. After the start period it runs once per hour, i.e. not inside the
+# measured windows of a run. Consequence: after start-up the health status is no longer refreshed during a run; the
+# bench does not rely on it (the API and the Workers are checked through /health/ready).
+x-bench-healthcheck: &bench-healthcheck
+  start_period: 300s
+  start_interval: 1s
+  interval: 3600s
+
+services:
+  postgres:
+    healthcheck: *bench-healthcheck
+  mongo:
+    healthcheck: *bench-healthcheck
+  redis:
+    healthcheck: *bench-healthcheck
+  # Short-lived mongosh client for the counts and the compact of the retention scenario (`docker compose run --rm
+  # --no-deps mongo-client ...`). A `compose run` of the mongo service itself would inherit the healthcheck above and
+  # run a mongosh every second (start_interval) inside the client container while it lives (review of Phase 10b,
+  # finding 8). Same image as mongo (extends); no data volume, no published port, no healthcheck.
+  mongo-client:
+    extends:
+      file: docker-compose.yml   # resolved against the project directory (the repository root), not this file
+      service: mongo
+    profiles: ["bench-client"]
+    volumes: !reset []
+    ports: !reset []
+    healthcheck:
+      disable: true
+  # The same for psql (monolithic counts): pg_isready is cheap, but both variants get the same treatment.
+  postgres-client:
+    extends:
+      file: docker-compose.yml
+      service: postgres
+    profiles: ["bench-client"]
+    volumes: !reset []
+    ports: !reset []
+    healthcheck:
+      disable: true

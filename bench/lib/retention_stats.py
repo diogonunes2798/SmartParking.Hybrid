@@ -8,12 +8,14 @@ Usage:
   python bench/lib/retention_stats.py count --variant hybrid|monolithic [--from <iso> --to <iso>]   (prints the number)
 
 Storage (the stats of the guide, step 2):
-  hybrid      after fsync (a checkpoint), db.occupancy_events.stats(): count, size, storageSize, freeStorageSize, totalIndexSize, indexSizes.<name>,
+  hybrid      after fsync (a checkpoint), $collStats storageStats of occupancy_events: count, size, storageSize,
+              freeStorageSize, totalIndexSize, indexFreeStorageSize, indexSizes.<name>,
               and the block compressor of the collection (from wiredTiger.creationString, in the configuration column);
   monolithic  over the partitions of monolith.occupancy_events (DEFAULT included): rows, heap + TOAST
               (pg_table_size), indexes (pg_indexes_size), number of partitions.
   Rows: storage_<phase>_events, _data_bytes (hybrid: uncompressed BSON), _storage_bytes, _free_bytes (hybrid only),
-  _index_bytes, _total_bytes (= storage + index), _index_<name>_bytes (hybrid), _partitions (monolithic).
+  _index_bytes, _index_free_bytes (hybrid only), _total_bytes (= storage + index), _used_bytes (= total minus the free
+  blocks WiredTiger reuses; monolithic: = total), _index_<name>_bytes (hybrid), _partitions (monolithic).
 
 CPU: usage_usec of the cgroup of each compose container (cpu.stat, cgroup v2), and the CPU time of the API and Workers
 processes on the host (Get-Process). cpu-diff writes cpu_<phase>_<name>_seconds, cpu_<phase>_total_seconds and, with
@@ -21,7 +23,8 @@ processes on the host (Get-Process). cpu-diff writes cpu_<phase>_<name>_seconds,
 use mongo and redis, which still run and would add their idle CPU). With --idle-before/--idle-after/--idle-seconds and
 --seconds it also writes the net CPU: delta - (idle rate x window length), per component, as cpu_<phase>_<name>_net_seconds,
 cpu_<phase>_total_net_seconds and _per_1e6_events (review of Phase 10, measurement finding 13: the windows have different
-lengths, and idle CPU includes the compose healthchecks, mongosh every 5 s in the mongo container).
+lengths). Phase 10b: run.sh keeps the compose healthchecks (mongosh every 5 s in the mongo container) out of the CPU
+windows with bench/compose.bench.yml.
 """
 import argparse
 import json
@@ -42,12 +45,22 @@ PG_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "smartparking")
 # fsync first: WiredTiger updates the sizes of collStats at a checkpoint (about every 60 s); without it, a reading just
 # after the load or the TTL deletes showed the sizes of the previous checkpoint (pilot of 17-11-2026, 09:49).
 # Two fsyncs: WiredTiger writes changed pages to new blocks (copy-on-write), and the blocks of the previous checkpoint are
-# free only once the next one completes. freeStorageSize is reported only with {freeStorage: 1}.
+# free only once the next one completes.
+# Phase 10b: read with $collStats, not the mongosh stats() helper. On MongoDB 7.0 the helper does not return
+# freeStorageSize (and the collStats command rejects the freeStorage option), and the old `|| 0` turned the missing
+# field into 0: every _free_bytes row of Phase 10a read 0 and _used_bytes equalled _total_bytes. Probe of 18-11-2026
+# (200 000 documents, half deleted, two fsyncs): helper -> field missing; $collStats, collStats and the WiredTiger
+# "file bytes available for reuse" -> 6 004 736 B, the same value. The fields are now required (KeyError if absent).
 MONGO_STATS_JS = (
     "db.adminCommand({fsync: 1}); db.adminCommand({fsync: 1});"
-    "const s = db.getSiblingDB('smartparking').occupancy_events.stats({freeStorage: 1});"
+    "const s = db.getSiblingDB('smartparking').occupancy_events"
+    ".aggregate([{$collStats: {storageStats: {}}}]).toArray()[0].storageStats;"
+    # storageStats has no indexFreeStorageSize (dbStats only): sum the WiredTiger free bytes of each index.
+    "const ixFree = Object.values(s.indexDetails).reduce("
+    "(t, d) => t + d['block-manager']['file bytes available for reuse'], 0);"
     "print(EJSON.stringify({count: s.count, size: s.size, storageSize: s.storageSize,"
-    " freeStorageSize: s.freeStorageSize || 0, totalIndexSize: s.totalIndexSize, indexSizes: s.indexSizes,"
+    " freeStorageSize: s.freeStorageSize, totalIndexSize: s.totalIndexSize,"
+    " indexFreeStorageSize: ixFree, indexSizes: s.indexSizes,"
     " creationString: (s.wiredTiger || {}).creationString || ''}, {relaxed: true}));"
 )
 
@@ -87,11 +100,13 @@ def hybrid_storage_rows(phase, stats):
         (f"{p}_events", stats["count"], "events"),
         (f"{p}_data_bytes", stats["size"], "bytes"),
         (f"{p}_storage_bytes", stats["storageSize"], "bytes"),
-        (f"{p}_free_bytes", stats.get("freeStorageSize", 0), "bytes"),
+        (f"{p}_free_bytes", stats["freeStorageSize"], "bytes"),
         (f"{p}_index_bytes", stats["totalIndexSize"], "bytes"),
+        (f"{p}_index_free_bytes", stats["indexFreeStorageSize"], "bytes"),
         (f"{p}_total_bytes", stats["storageSize"] + stats["totalIndexSize"], "bytes"),
         # Space the collection really holds: WiredTiger reuses the free blocks for new inserts (finding 14).
-        (f"{p}_used_bytes", stats["storageSize"] - stats.get("freeStorageSize", 0) + stats["totalIndexSize"], "bytes"),
+        (f"{p}_used_bytes", stats["storageSize"] - stats["freeStorageSize"]
+         + stats["totalIndexSize"] - stats["indexFreeStorageSize"], "bytes"),
     ]
     for name, size in sorted((stats.get("indexSizes") or {}).items()):
         rows.append((f"{p}_index_{name}_bytes", size, "bytes"))
@@ -161,16 +176,19 @@ def archive_rows(path):
 def count_events(variant, since=None, until=None):
     """Counted from a client in a container of its own (`docker compose run --rm --no-deps`), not with `exec`: an `exec`
     runs the client (mongosh is a Node.js process) inside the cgroup of the database container, so polling during a CPU
-    window was measured as database CPU, much more for mongosh than for psql (review of Phase 10, measurement finding 1)."""
+    window was measured as database CPU, much more for mongosh than for psql (review of Phase 10, measurement finding 1).
+    Phase 10b: the client services of bench/compose.bench.yml (mongo-client, postgres-client) have no healthcheck; a
+    `run` of the database service itself would inherit its healthcheck (finding 8 of the final review). Needs the
+    COMPOSE_FILE that bench/run.sh exports."""
     if variant == "hybrid":
         query = "{}" if since is None else (
             f"{{timestamp: {{$gte: ISODate('{since}'), $lt: ISODate('{until}')}}}}")
         uri = f"mongodb://{MONGO_USER}:{MONGO_PASSWORD}@mongo:27017/smartparking?authSource=admin"
-        out = run(["docker", "compose", "run", "--rm", "--no-deps", "-T", "mongo", "mongosh", uri, "--quiet", "--eval",
+        out = run(["docker", "compose", "run", "--rm", "--no-deps", "-T", "mongo-client", "mongosh", uri, "--quiet", "--eval",
                    f"print(db.occupancy_events.countDocuments({query}))"])
         return int(out.strip().splitlines()[-1])
     where = "" if since is None else f" WHERE \"timestamp\" >= '{since}' AND \"timestamp\" < '{until}'"
-    out = run(["docker", "compose", "run", "--rm", "--no-deps", "-T", "-e", f"PGPASSWORD={PG_PASSWORD}", "postgres",
+    out = run(["docker", "compose", "run", "--rm", "--no-deps", "-T", "-e", f"PGPASSWORD={PG_PASSWORD}", "postgres-client",
                "psql", "-h", "postgres", "-U", PG_USER, "-d", PG_DB, "-At", "-c",
                f"SELECT count(*) FROM monolith.occupancy_events{where}"])
     return int(out.strip().splitlines()[-1])
@@ -226,7 +244,8 @@ def main(argv=None):
         config = a.config
         if a.variant == "hybrid":
             stats = json.loads(mongo_eval(MONGO_STATS_JS))
-            config += f";compressor={compressor_of(stats.get('creationString')) or 'snappy(default)'}"
+            # engine_compressor (Phase 10b): the scenario already writes compressor= (the requested one; finding 14).
+            config += f";engine_compressor={compressor_of(stats.get('creationString')) or 'snappy(default)'}"
             rows = hybrid_storage_rows(a.phase, stats)
         else:
             rows = monolithic_storage_rows(a.phase, json.loads(psql(PG_STATS_SQL)))

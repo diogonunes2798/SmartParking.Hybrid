@@ -4,7 +4,8 @@
 #   ./bench/run.sh <scenario> [--variant hybrid|monolithic] [--runs 5] [--warmup 60] [--allow-dirty]
 #
 # For each run n = 1..N:
-#   1. docker compose down -v and up -d --wait (clean state: no data from the previous run);
+#   1. docker compose down -v and up -d --wait (clean state: no data from the previous run), with the bench override
+#      bench/compose.bench.yml (healthchecks only at start-up, then hourly: their CPU stays out of the measurement);
 #   2. applies the migrations and starts the API and the Workers (Release build, ASPNETCORE_ENVIRONMENT=Benchmark,
 #      Persistence__Mode of the variant), and waits for /health/ready of both;
 #   3. loads the base data: the facilities, spots and sensors of scenario D8 (bench/scenarios/d8-reference.json), through
@@ -63,6 +64,12 @@ ROOT_NATIVE="$(pwd -W 2> /dev/null || pwd)"
 DEFINITION="bench/scenarios/$SCENARIO.sh"
 [[ -f "$DEFINITION" ]] || { echo "no scenario definition $DEFINITION" >&2; exit 2; }
 
+# Phase 10b: every docker compose call of the bench (and of the Python collectors it starts) uses the bench override,
+# which keeps the healthchecks out of the measured windows (bench/compose.bench.yml). The separator is set explicitly:
+# Compose on Windows defaults to ';'. Recorded in meta.json (environment) and in the configuration column.
+export COMPOSE_PATH_SEPARATOR=:
+export COMPOSE_FILE=docker-compose.yml:bench/compose.bench.yml
+
 # results/ is left out: the CSV of an earlier session, not yet committed, does not change the code being measured.
 if [[ -n "$(git status --porcelain -- . ':!results')" && $ALLOW_DIRTY -eq 0 ]]; then
   echo "uncommitted changes: commit them or pass --allow-dirty (they are recorded in meta.json)" >&2
@@ -91,6 +98,12 @@ ports_free() {
   done
 }
 ports_free || exit 2
+
+# bench/compose.bench.yml needs healthcheck start_interval (Docker Engine >= 25): without it the first check would only
+# run after `interval` (1 h) and `up --wait` would block (final review of Phase 10b, finding 9).
+DOCKER_MAJOR="$(docker version --format '{{.Server.Version}}' 2> /dev/null | cut -d. -f1)"
+[[ "$DOCKER_MAJOR" =~ ^[0-9]+$ ]] && (( DOCKER_MAJOR >= 25 )) \
+  || { echo "Docker Engine >= 25 is required (healthcheck start_interval); found '${DOCKER_MAJOR:-none}'" >&2; exit 2; }
 
 STAMP="$(date +%Y-%m-%d_%H%M)"
 OUT_DIR="results/$SCENARIO"
@@ -254,7 +267,7 @@ source "$DEFINITION"
 declare -F scenario_run > /dev/null && declare -F scenario_warmup > /dev/null && declare -F scenario_config > /dev/null \
   || { echo "$DEFINITION must define scenario_config, scenario_warmup and scenario_run" >&2; exit 2; }
 declare -F scenario_seed > /dev/null || scenario_seed() { seed_d8; }
-CONFIG_BASE="variant=$VARIANT;mode=$MODE;warmup=${WARMUP_SECONDS}s;commit=$GIT_SHORT;pool=$POOL;$(scenario_config)"
+CONFIG_BASE="variant=$VARIANT;mode=$MODE;warmup=${WARMUP_SECONDS}s;commit=$GIT_SHORT;pool=$POOL;healthcheck=bench-1h;$(scenario_config)"
 
 # ---------------------------------------------------------------------------------------------------------------------
 log "scenario $SCENARIO, variant $VARIANT, $RUNS run(s), warm-up ${WARMUP_SECONDS} s -> $CSV"
