@@ -198,5 +198,22 @@ Cada execução tem cinco passos:
 - O CPU da carga não é comparado aqui: inclui os *healthchecks* do compose, e a linha de base em repouso é curta demais.
   - **Decisão da 10b:** opção A. Os *healthchecks* só correm no arranque e depois de hora a hora (`bench/compose.bench.yml`), e o repouso passa a 120 s.
   - **Medido em repouso:** o `mongo` desce de 0,145 para 0,0045 s de CPU por segundo.
-  - Os números comparáveis exigem repetir as sessões (`TODO(Diogo)`).
+  - As sessões foram repetidas na 10b (resultados abaixo).
 - **Espaço livre.** As linhas `_free_bytes` e `_used_bytes` do híbrido nestes CSV são inválidas (sempre 0; limitação 14). Os valores de `_total_bytes` e os de depois do `compact` estão certos.
+
+**Resultados repetidos na 10b** (*commit* `81a7a5f`; `results/retention/2026-11-18_1510.csv`, `_1824.csv`, `_2138.csv`):
+- os *healthchecks* ficaram fora das janelas e o espaço livre passou a ser lido;
+- medianas de 5 execuções (no monolítico, a retenção usa as 4 execuções que não passaram a meia-noite UTC);
+- MB = 10⁶ bytes; espaço em `used` / `total`.
+
+| | Híbrido `snappy` | Híbrido `zstd` | Monolítico |
+|---|---|---|---|
+| Espaço depois da carga | 182,5 / 246,8 MB | 154,8 / 218,1 MB | 357,4 MB |
+| Espaço depois da retenção | 95,9 / 245,3 MB | 83,2 / 218,1 MB | 178,7 MB |
+| Espaço depois do `compact` | 95,9 / 102,5 MB | 83,2 / 86,1 MB | — |
+| CPU da carga, bruto (por 10⁶ eventos) | 323,3 s | 333,6 s | 175,0 s |
+| CPU da retenção, bruto | 36,5 s | 37,1 s | 11,8 s |
+
+- **O TTL liberta o espaço dentro do WiredTiger** (o `used` desce). O `compact` devolve-o ao disco.
+- **Na tese, o CPU bruto é a comparação principal.** O líquido ainda tem componentes ligeiramente negativos (diário da 10b).
+- **Limitação 12:** os números de espaço continuam sem o *stream* Redis.

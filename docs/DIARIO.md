@@ -1789,7 +1789,7 @@ As duas conclusões que mais pesam para a tese:
 ### Pontos em aberto para o Diogo
 
 **Decisões novas, levantadas pela revisão final:**
-1. Repetir as três sessões do `retention` com as correções (cerca de 9 h)? Sem isso, o espaço livre e o CPU da carga da 10a não servem para a tese.
+1. ~~Repetir as três sessões do `retention` com as correções?~~ **Respondido:** o Diogo decidiu repetir. Foram feitos um piloto e as três sessões, com os resultados no fim desta entrada.
 2. O *stream* Redis e a outbox: implementar o aparo e a purga (com medição da memória do *stream*), ou declarar a exclusão como limitação do RNF-05? (achado 2)
 3. A retenção e a agregação ficam ligadas ou desligadas nos cenários de desempenho (`appsettings.Benchmark.json`)? No monolítico, a retenção faz `min("timestamp")` sem índice, a cada minuto. (achado 4)
 4. A janela de consistência do UC-02: medir só até ao *bus*, ou criar um consumidor dos eventos de sessão? (achado 7)
@@ -1803,3 +1803,60 @@ As duas conclusões que mais pesam para a tese:
 - os prazos de retenção (`RawEvents`, `ArchiveDelay`, `GuardMargin`, `MaxEventAge`);
 - o *pool* da API monolítica como ameaça à validade;
 - as referências bibliográficas por inserir nos ADR-0004, 0006 e 0007.
+
+### Medição oficial repetida (18-11-2026, 15:10 a 19-11-2026, 00:45)
+
+Três sessões de 5 execuções, sem aquecimento, *commit* `81a7a5f`, árvore limpa, `status: ok` em todas, código de saída 0. Não ficaram processos órfãos.
+
+| Configuração | Comando | Ficheiro |
+|---|---|---|
+| híbrido, `snappy` | `./bench/run.sh retention --variant hybrid --runs 5 --warmup 0` | `results/retention/2026-11-18_1510.csv` |
+| híbrido, `zstd` | `RETENTION_COMPRESSOR=zstd ./bench/run.sh retention --variant hybrid --runs 5 --warmup 0` | `results/retention/2026-11-18_1824.csv` |
+| monolítico, partições diárias | `./bench/run.sh retention --variant monolithic --runs 5 --warmup 0` | `results/retention/2026-11-18_2138.csv` |
+
+Antes de deixar a cadeia a correr sozinha, verifiquei a execução 1 do `snappy` (memória «bench-sessoes»).
+
+**Resultados comuns a todas as execuções:**
+- 999 264 eventos aceites e guardados, 0 recusados e 0 erros;
+- 499 847 eventos elegíveis;
+- repouso de 120 s;
+- carga de 2 021 a 2 025 s.
+
+**A execução 4 do monolítico passou a meia-noite UTC** (`crossed_midnight` = 1). Arquivou 3 dias e removeu 749 595 eventos, como previsto no desenho do cenário. As suas linhas da retenção não são comparáveis. Para essas linhas, o monolítico apresenta a mediana das **4 execuções comparáveis** (1, 2, 3 e 5). As linhas da carga usam as 5 execuções. `TODO(Diogo)`: chega com 4, ou repete-se uma execução?
+
+**Eventos removidos:**
+- híbrido: com `snappy`, entre 498 838 e 498 983 (mediana de 498 927); com `zstd`, entre 498 879 e 499 016 (mediana de 498 960). Os restantes elegíveis ficam retidos pela margem da guarda, por desenho;
+- monolítico: exatamente os 499 847.
+
+**Espaço** (mediana; MB = 10⁶ bytes). Os valores são `used` / `total`: `used` desconta o espaço livre que o WiredTiger reutiliza; `total` = `storageSize` + índices. No monolítico, os dois são iguais.
+
+| Fase | Híbrido `snappy` | Híbrido `zstd` | Monolítico |
+|---|---|---|---|
+| Depois da carga | 182,5 / 246,8 | 154,8 / 218,1 | 357,4 |
+| Depois da retenção | 95,9 / 245,3 | 83,2 / 218,1 | 178,7 (4 execuções) |
+| Depois do `compact` | 95,9 / 102,5 | 83,2 / 86,1 | — |
+
+- **O `used` do híbrido já desce com a retenção** (182,5 → 95,9 MB) e é igual antes e depois do `compact`. O `compact` só devolve ao disco o espaço que o TTL já tinha libertado dentro do WiredTiger. É a leitura que faltava na 10a.
+- **Logo depois da carga, há cerca de 63 MB livres nos índices** (*splits* das árvores B). Por isso, mesmo antes da retenção, o `used` é menor do que o `total`.
+- **O `zstd` reduz a coleção em 34,2 %** (`storageSize` 84,0 → 55,3 MB), o total depois da carga em 11,6 % e o `used` depois da retenção em 13,2 %. Os índices não mudam.
+- **Monolítico:** o `DROP` liberta logo metade do espaço (357,4 → 178,7 MB).
+- **Limitação 12 do ADR-0013, ainda em vigor:** o espaço do *stream* Redis (uma cópia de cada evento na memória) não entra nestes números.
+
+**CPU** (mediana [mínimo; máximo] de 5 execuções, segundos, soma dos componentes da variante):
+
+| Janela | Híbrido `snappy` | Híbrido `zstd` | Monolítico |
+|---|---|---|---|
+| Carga, bruto | 323,3 [310,5; 360,4] | 333,6 [331,5; 342,5] | 175,0 [172,2; 178,0] |
+| Carga, líquido | 237,4 [219,9; 267,2] | 238,8 [227,6; 256,9] | 134,2 [130,0; 138,4] |
+| Retenção, bruto | 36,5 [35,4; 41,5] | 37,1 [36,7; 40,3] | 11,8 (4 execuções; [10,9; 12,7]) |
+| Retenção, líquido | 32,2 [30,6; 36,4] | 32,2 [31,0; 35,6] | 11,1 (4 execuções; [10,2; 12,0]) |
+| `compact`, bruto | 1,6 [1,5; 1,9] | 2,5 [2,3; 4,1] | — |
+
+- **Carga, por componente** (bruto):
+  - híbrido `snappy`: `redis` 133,4 s, Workers 83,5 s, `mongo` 67,0 s, API 27,0 s, `postgres` 13,6 s;
+  - monolítico: `postgres` 137,2 s, API 24,7 s, Workers 12,4 s.
+- **Confirmação da hipótese da 10a:** o bruto do `mongo` na carga desce de cerca de 340 s (10a) para 67,0 s. Os cerca de 273 s de diferença batem com a estimativa da 10a (cerca de 280 s), que era só uma extrapolação. Na carga, o híbrido gasta cerca de 1,8 vezes o CPU do monolítico, e não cerca de 3,3 vezes como os números da 10a sugeriam.
+- **O líquido ainda tem componentes negativos:** `postgres` no híbrido −8,0 s e Workers no monolítico −2,9 s. Em repouso, estes processos gastam mais por segundo do que durante a carga. A causa provável é a janela de repouso logo a seguir à carga dos dados base (*autovacuum*, arranque), mas **não foi verificada**. Por isso, **na tese o bruto é a comparação principal** (já sem o ruído dos *healthchecks*), e o líquido serve como indicação. O erro é pequeno face aos totais (≤ 10 s em 175 a 333 s).
+- **`retention_seconds`:** 109 s no híbrido e 37 s no monolítico. Inclui as esperas pelo monitor TTL (de 60 em 60 s) e pelas contagens (de 15 em 15 s), por isso não é a duração do trabalho.
+
+**Os CSV da 10a mantêm-se versionados.** Para a tese, contam os da 10b. Na 10a, as linhas `_free_bytes` e `_used_bytes` do híbrido são inválidas, e o CPU da carga inclui os *healthchecks*.
