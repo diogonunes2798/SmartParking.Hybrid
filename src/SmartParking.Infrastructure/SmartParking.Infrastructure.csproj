@@ -16,6 +16,10 @@
     <PackageReference Include="AspNetCore.HealthChecks.NpgSql" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="SmartParking.UnitTests" />
+  </ItemGroup>
+
   <ItemGroup Label="Relational SQL">
     <!-- Versioned scripts run by the migrations (spec 001). -->
     <EmbeddedResource Include="Relational\Migrations\Sql\*.sql" LogicalName="Sql.%(Filename)%(Extension)" />

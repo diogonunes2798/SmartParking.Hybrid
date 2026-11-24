@@ -1,4 +1,11 @@
+using System.Diagnostics;
+using System.Reflection;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using SmartParking.Application.Abstractions;
+using SmartParking.Application.Abstractions.Persistence;
+using SmartParking.Domain.Common;
 using SmartParking.Domain.Facilities;
 using SmartParking.Domain.Sessions;
 using SmartParking.Domain.Users;
@@ -9,9 +16,13 @@ namespace SmartParking.Infrastructure.Relational;
 
 /// <summary>
 /// Relational sublayer (PostgreSQL + PostGIS): the three aggregates of Table 15, the audit trail and the outbox.
-/// The schema is created by the <c>Initial</c> migration, run by the table owner (spec 001).
+/// It is the unit of work (D10): one save writes the business change, one <see cref="AuditEntry"/> and one
+/// <see cref="OutboxMessage"/> per domain event, in one transaction (spec 001). Never 2PC.
 /// </summary>
-internal sealed class SmartParkingDbContext(DbContextOptions<SmartParkingDbContext> options) : DbContext(options)
+internal sealed class SmartParkingDbContext(
+    DbContextOptions<SmartParkingDbContext> options,
+    ICurrentActor actor,
+    TimeProvider clock) : DbContext(options), IUnitOfWork
 {
     public DbSet<Operator> Operators => Set<Operator>();
 
@@ -41,6 +52,25 @@ internal sealed class SmartParkingDbContext(DbContextOptions<SmartParkingDbConte
 
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
+    async Task<Result> IUnitOfWork.SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        AppendAuditAndOutbox();
+
+        try
+        {
+            await SaveChangesAsync(cancellationToken);
+            return Result.Success();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return PostgresErrorTranslator.StaleVersion;
+        }
+        catch (DbUpdateException exception) when (PostgresErrorTranslator.TryTranslate(exception, out var error))
+        {
+            return error;
+        }
+    }
+
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         // Enums as text: readable rows and CHECKs that name the values ('Occupancy', 'Active').
@@ -57,5 +87,56 @@ internal sealed class SmartParkingDbContext(DbContextOptions<SmartParkingDbConte
             type => type.Namespace?.StartsWith(typeof(SmartParkingDbContext).Namespace!, StringComparison.Ordinal) == true);
 
         SnakeCaseNamingConvention.Apply(modelBuilder);
+    }
+
+    private static string OutboxType(IDomainEvent domainEvent) =>
+        domainEvent.GetType().GetCustomAttribute<DomainEventAttribute>()?.TypeName
+        ?? throw new InvalidOperationException($"{domainEvent.GetType().Name} has no [DomainEvent] attribute.");
+
+    private static AuditOperation OperationOf(EntityEntry entry) => entry.State switch
+    {
+        EntityState.Added => AuditOperation.Created,
+        EntityState.Deleted => AuditOperation.Deleted,
+        _ => AuditOperation.Updated,
+    };
+
+    /// <summary>
+    /// Turns every pending domain event into an outbox message and an audit entry that points to it.
+    /// Runs before the save, so both rows join the business change in the same transaction.
+    /// </summary>
+    private void AppendAuditAndOutbox()
+    {
+        var now = clock.GetUtcNow();
+        var traceId = Activity.Current?.TraceId.ToHexString();
+
+        foreach (var entry in ChangeTracker.Entries<AggregateRoot>().ToList())
+        {
+            foreach (var domainEvent in entry.Entity.DequeueDomainEvents())
+            {
+                var message = new OutboxMessage
+                {
+                    Id = Guid.CreateVersion7(now),
+                    Type = OutboxType(domainEvent),
+                    Payload = JsonSerializer.Serialize(domainEvent, domainEvent.GetType(), AuditSnapshot.JsonOptions),
+                    OccurredAt = now,
+                    TraceId = traceId,
+                };
+
+                OutboxMessages.Add(message);
+                AuditEntries.Add(new AuditEntry
+                {
+                    Id = Guid.CreateVersion7(now),
+                    OccurredAt = now,
+                    Actor = actor.Name,
+                    EntityType = entry.Metadata.ClrType.Name,
+                    EntityId = entry.Entity.Id,
+                    Operation = OperationOf(entry),
+                    Before = AuditSnapshot.Before(entry),
+                    After = AuditSnapshot.After(entry),
+                    TraceId = traceId,
+                    OutboxMessageId = message.Id,
+                });
+            }
+        }
     }
 }

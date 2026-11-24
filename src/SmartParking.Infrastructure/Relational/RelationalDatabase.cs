@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SmartParking.Application.Abstractions;
 
 namespace SmartParking.Infrastructure.Relational;
 
@@ -20,7 +21,18 @@ public static class RelationalDatabase
     }
 
     internal static SmartParkingDbContext CreateOwnerContext(string ownerConnectionString) =>
-        new(new DbContextOptionsBuilder<SmartParkingDbContext>()
-            .UseNpgsql(ownerConnectionString, npgsql => npgsql.UseNetTopologySuite())
-            .Options);
+        new(
+            new DbContextOptionsBuilder<SmartParkingDbContext>()
+                .UseNpgsql(ownerConnectionString, npgsql => npgsql.UseNetTopologySuite())
+                .Options,
+            MigrationsActor.Instance,
+            TimeProvider.System);
+
+    /// <summary>Migrations change no aggregate, so nothing is audited; the actor only satisfies the constructor.</summary>
+    private sealed class MigrationsActor : ICurrentActor
+    {
+        public static readonly MigrationsActor Instance = new();
+
+        public string Name => "migrations";
+    }
 }
