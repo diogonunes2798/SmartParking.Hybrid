@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Git pre-commit entry point (enabled with: git config core.hooksPath .githooks).
+# Runs the dotnet-claude-kit hooks copied into this folder:
+#   1. pre-commit-antipattern.sh — text scan of the lines this commit adds
+#   2. pre-commit-format.sh      — dotnet format --verify-no-changes
+# The format check is skipped until SmartParking.slnx exists, so commits made
+# before the solution is scaffolded (docs, config) are not blocked.
+
+set -euo pipefail
+
+HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+bash "$HOOKS_DIR/pre-commit-antipattern.sh"
+
+if [[ -f "$REPO_ROOT/SmartParking.slnx" ]]; then
+    (cd "$REPO_ROOT" && bash "$HOOKS_DIR/pre-commit-format.sh")
+else
+    echo "Format check skipped: SmartParking.slnx not found yet."
+fi
