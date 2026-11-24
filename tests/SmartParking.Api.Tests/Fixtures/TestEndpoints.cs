@@ -54,6 +54,8 @@ internal sealed class TestEndpoints : IEndpointGroup
         ErrorType.NotFound => Error.NotFound("Test.NotFound", "Not found."),
         ErrorType.Conflict => Error.Conflict("Test.Conflict", "Conflict."),
         ErrorType.Unauthorized => Error.Unauthorized("Test.Unauthorized", "Unauthorized."),
+        ErrorType.PreconditionFailed => Error.PreconditionFailed("Test.PreconditionFailed", "Stale version."),
+        ErrorType.PreconditionRequired => Error.PreconditionRequired("Test.PreconditionRequired", "If-Match is required."),
         ErrorType.Validation => Error.Validation(
             "Test.Validation",
             "Invalid.",

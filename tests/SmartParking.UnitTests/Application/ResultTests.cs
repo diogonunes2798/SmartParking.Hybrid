@@ -35,6 +35,8 @@ public sealed class ResultTests
     [InlineData(ErrorType.NotFound)]
     [InlineData(ErrorType.Conflict)]
     [InlineData(ErrorType.Unauthorized)]
+    [InlineData(ErrorType.PreconditionFailed)]
+    [InlineData(ErrorType.PreconditionRequired)]
     public void ErrorFactory_NonValidationType_HasTypeAndNoFieldErrors(ErrorType type)
     {
         // Act
@@ -42,6 +44,8 @@ public sealed class ResultTests
         {
             ErrorType.NotFound => Error.NotFound("Code", "Description"),
             ErrorType.Conflict => Error.Conflict("Code", "Description"),
+            ErrorType.PreconditionFailed => Error.PreconditionFailed("Code", "Description"),
+            ErrorType.PreconditionRequired => Error.PreconditionRequired("Code", "Description"),
             _ => Error.Unauthorized("Code", "Description"),
         };
 

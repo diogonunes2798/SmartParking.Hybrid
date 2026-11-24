@@ -28,6 +28,8 @@ internal static class ResultExtensions
             ErrorType.NotFound => Problem(error, StatusCodes.Status404NotFound),
             ErrorType.Conflict => Problem(error, StatusCodes.Status409Conflict),
             ErrorType.Unauthorized => Problem(error, StatusCodes.Status401Unauthorized),
+            ErrorType.PreconditionFailed => Problem(error, StatusCodes.Status412PreconditionFailed),
+            ErrorType.PreconditionRequired => Problem(error, StatusCodes.Status428PreconditionRequired),
             _ => throw new ArgumentOutOfRangeException(nameof(error), error.Type, "Unknown error type."),
         };
     }
