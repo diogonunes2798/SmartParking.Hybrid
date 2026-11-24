@@ -21,7 +21,6 @@
 
   <ItemGroup Label="Cache">
     <PackageReference Include="StackExchange.Redis" />
-    <PackageReference Include="AspNetCore.HealthChecks.Redis" />
   </ItemGroup>
 
   <ItemGroup Label="Hosting">

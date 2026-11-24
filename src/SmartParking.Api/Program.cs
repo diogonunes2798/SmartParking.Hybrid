@@ -7,7 +7,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddHostingDefaults("SmartParking.Api");
 builder.Services
-    .AddApplication()
+    .AddApplication(typeof(Program).Assembly)
     .AddInfrastructure(builder.Configuration)
     .AddEndpointGroups(typeof(Program).Assembly)
     .AddOpenApi();

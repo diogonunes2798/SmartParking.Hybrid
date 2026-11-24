@@ -69,4 +69,34 @@ public sealed class HealthEndpointsTests(ApiFixture fixture)
         Assert.Equal("Healthy", report.Checks["mongo"].Status);
         await HealthAssertions.AssertLiveAsync(client, cancellationToken);
     }
+
+    [Fact]
+    public async Task GetReady_RedisStopsWhileRunning_Returns503WithinTheCheckTimeout_AC7()
+    {
+        // Arrange: ready first, then Redis goes away under a running host.
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var timeout = TimeSpan.FromSeconds(3);
+        await using var redis = new RedisBuilder(ContainerImages.Redis).Build();
+        await redis.StartAsync(cancellationToken);
+        var settings = fixture.Databases.Settings(PersistenceMode.Hybrid);
+        settings["ConnectionStrings:Redis"] = redis.GetConnectionString();
+        settings[HealthCheckTags.TimeoutKey] = timeout.ToString();
+
+        await using var factory = ApiFixture.CreateFactory(settings);
+        using var client = factory.CreateClient();
+        await HealthAssertions.AssertReadyAsync(client, ["postgres", "mongo", "redis"], cancellationToken);
+        await redis.StopAsync(cancellationToken);
+
+        // Act
+        var started = TimeProvider.System.GetTimestamp();
+        using var ready = await client.GetAsync(new Uri(HealthAssertions.Ready, UriKind.Relative), cancellationToken);
+        var elapsed = TimeProvider.System.GetElapsedTime(started);
+        var report = await HealthAssertions.ReadReportAsync(ready, cancellationToken);
+
+        // Assert: the per-check timeout bounds the answer (spec 000, edge cases).
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+        Assert.Equal("Unhealthy", report.Checks["redis"].Status);
+        Assert.True(elapsed < timeout * 2, $"Readiness took {elapsed}, configured check timeout is {timeout}.");
+        await HealthAssertions.AssertLiveAsync(client, cancellationToken);
+    }
 }

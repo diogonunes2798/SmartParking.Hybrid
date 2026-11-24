@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using StackExchange.Redis;
 
 namespace SmartParking.Infrastructure.Cache;
 
@@ -20,17 +19,10 @@ internal static class CacheRegistration
         var connectionString = configuration.GetConnectionString(ConnectionStringName)
             ?? throw new InvalidOperationException($"ConnectionStrings:{ConnectionStringName} is not configured.");
 
-        // Created on first use; AbortOnConnectFail=false keeps retrying instead of failing the host.
-        services.AddSingleton<IConnectionMultiplexer>(_ =>
-        {
-            var options = ConfigurationOptions.Parse(connectionString);
-            options.AbortOnConnectFail = false;
-            return ConnectionMultiplexer.Connect(options);
-        });
+        services.AddSingleton(_ => new RedisConnection(connectionString));
 
-        healthChecks.AddRedis(
-            sp => sp.GetRequiredService<IConnectionMultiplexer>(),
-            name: HealthCheckName,
+        healthChecks.AddCheck<RedisHealthCheck>(
+            HealthCheckName,
             tags: [HealthCheckTags.Ready],
             timeout: timeout);
 

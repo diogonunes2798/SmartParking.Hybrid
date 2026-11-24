@@ -6,10 +6,11 @@ namespace SmartParking.Workers.Tests.Features.Configuration;
 public sealed class WorkersPersistenceModeTests
 {
     [Theory]
-    [InlineData(null)]
+    [InlineData("hybrid")]
     [InlineData("")]
     [InlineData("Hibrido")]
-    public void Startup_PersistenceModeMissingOrInvalid_FailsNamingTheKey_AC9(string? mode)
+    [InlineData("0")]
+    public void Startup_PersistenceModeEmptyOrInvalid_FailsNamingTheKey_AC9(string mode)
     {
         // Arrange
         var settings = DatabaseContainers.UnreachableSettings(PersistenceMode.Hybrid);
