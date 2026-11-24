@@ -138,3 +138,17 @@ Formato de cada entrada:
   - ADR 0002: o espaço de nomes raiz e `Messaging/` ficam de fora das regras de isolamento, por desenho; a regra de `Messaging/` define-se na F3/F4.
   - Não alterados: a personalização do `traceId` (redundante com o *default* do ASP.NET Core, mas explícita); a igualdade por referência do dicionário em `Error` (sem uso que dependa dela); o exportador CSV (F12, fora da 000).
 - ***Commits:*** `902678c` (correções e testes), `1b7ce9a` (documentação).
+
+## F1: integração na `main`
+
+- **Data:** 2026-11-24
+- **Feito:**
+  - *Push* do ramo `feat/000-fundacao` (8 *commits*) e [PR #1](https://github.com/diogonunes2798/SmartParking.Hybrid/pull/1), com a correspondência AC → teste, o relatório do `/verify` e os achados da revisão independente na descrição.
+  - *Merge* pedido pelo Diogo, com *merge commit* (`0edbb45`), para manter na `main` os *commits* atómicos da F1. Depois, o ramo foi apagado no `origin` e localmente, e confirmou-se antes que já estava integrado.
+  - Plano 000 marcado como integrado na `main`.
+- **Problemas:**
+  - O primeiro pedido de *push* foi interrompido pelo Diogo antes de chegar ao `origin` (confirmado com `git ls-remote`); foi repetido a seguir, sem alterações.
+  - O repositório não tem integração contínua (fora da F1, especificação 000), por isso o PR não teve verificações automáticas: a garantia são os resultados locais (41 testes, build e format limpos) registados na descrição.
+- **Decisões:**
+  - *Merge commit* em vez de *squash*: os *commits* da F1 referidos neste diário continuam a existir na `main`.
+- ***Commits:*** `0edbb45` (*merge* do PR #1); registo desta entrada no commit seguinte.

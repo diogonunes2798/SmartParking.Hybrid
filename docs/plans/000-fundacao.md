@@ -1,7 +1,7 @@
 # Plano 000 — Fundação da solução (F1)
 
 - **Especificação:** [000-visao-geral](../specs/000-visao-geral.md) (aprovada a 2026-11-24)
-- **Estado:** Implementado (2026-11-24), ramo `feat/000-fundacao`
+- **Estado:** Implementado e integrado na `main` (2026-11-24): [PR #1](https://github.com/diogonunes2798/SmartParking.Hybrid/pull/1), *merge commit* `0edbb45`
 - **Requisitos:** transversal (OE6, secção 5.9.1); pontos de extensão de D2 e D10
 
 ## Decisões tomadas no planeamento (Diogo, 2026-11-24)
