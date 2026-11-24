@@ -6,4 +6,4 @@
 
 | N.º | Título | Decisão (D1–D10) | RF/RNF | Secção da tese | Estado | Data |
 |---|---|---|---|---|---|---|
-| 0001 | [Infraestrutura local de desenvolvimento](0001-infraestrutura-local.md) | TODO(Diogo) | RF-04, RNF-03 | TODO(Diogo) | Proposto | 2026-11-24 |
+| 0001 | [Infraestrutura local de desenvolvimento](0001-infraestrutura-local.md) | — | RF-04, RNF-03 | 5.9.1 | Proposto | 2026-11-24 |

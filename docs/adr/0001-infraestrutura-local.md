@@ -3,8 +3,8 @@
 - **Estado:** Proposto
 - **Data:** 2026-11-24
 - **Requisitos:** RF-04 (PostGIS), RNF-03 (falha de nó, replica set)
-- **Decisão (D1–D10):** TODO(Diogo): indicar a decisão D aplicável, se existir.
-- **Secção da tese:** TODO(Diogo): indicar a secção do Cap. 5.
+- **Decisão (D1–D10):** nenhuma (infraestrutura de desenvolvimento, não é uma decisão diferida).
+- **Secção da tese:** 5.9.1.
 
 ## Contexto
 
