@@ -6,4 +6,4 @@
 
 | Plano | Especificação | Estado | Data |
 |---|---|---|---|
-| — | Nenhum plano registado | — | — |
+| [000-fundacao](000-fundacao.md) | [000-visao-geral](../specs/000-visao-geral.md) | Implementado | 2026-11-24 |

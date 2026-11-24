@@ -84,3 +84,36 @@ Formato de cada entrada:
   - Fora da F1: exportador CSV (F12), `tools/` (nas suas fases), autenticação e HTTPS (F11), integração contínua.
   - Testes: ArchitectureTests, Api.Tests, Workers.Tests e um único UnitTests; Testcontainers com as imagens do `compose.yaml`; avisos tratados como erros.
 - ***Commits:*** `c3de3e1`.
+
+## F1: implementação da fundação (especificação 000)
+
+- **Data:** 2026-11-24
+- **Feito:**
+  - Plano aprovado pelo Diogo ([`docs/plans/000-fundacao.md`](plans/000-fundacao.md)), ramo `feat/000-fundacao`.
+  - `SmartParking.slnx`, `global.json` (SDK 10.0.404, `rollForward: latestPatch`, *runner* Microsoft.Testing.Platform), `Directory.Build.props` (`TreatWarningsAsErrors`, `Nullable`, `AnalysisLevel latest-recommended`, `EnforceCodeStyleInBuild`) e `Directory.Packages.props`.
+  - Domain vazio; Application com `Result`, `Result<T>`, `Error` tipado, `ICommandHandler<,>`, `IQueryHandler<,>`, `IEventBus` (D2), `IUnitOfWork` (D10) e `AddApplication` por varrimento do *assembly*.
+  - Infrastructure: `PersistenceOptions` validado no arranque; um método de registo por modo; ligação e *health check* por subcamada; `Hosting/` com `IEndpointGroup`, `/health/live`, `/health/ready`, `GlobalExceptionHandler`, Serilog e OpenTelemetry.
+  - Api e Workers com `Program.cs` mínimo; OpenAPI e Scalar só em `Development`.
+  - Testes: 39, todos a passar (`dotnet test`: ArchitectureTests, UnitTests, Api.Tests, Workers.Tests). AC-1 a AC-14 cobertos por testes com o número no nome.
+  - ADR 0002 (estrutura) e ADR 0003 (D10, AC-15); rastreabilidade atualizada.
+  - Verificação manual: `docker compose up -d --wait`, Api com as credenciais do `.env` em variáveis de ambiente; `GET /health/ready` devolveu 200 com `postgres`, `mongo` e `redis` em `Healthy`; `/openapi/v1.json` e `/scalar/v1` devolveram 200 em `Development`.
+- **Versões dos pacotes** (resolvidas a 2026-11-24 com `dotnet package search` e o índice do NuGet): FluentValidation 12.2.0; Microsoft.Extensions.DependencyInjection.Abstractions, Microsoft.AspNetCore.OpenApi e Microsoft.AspNetCore.Mvc.Testing 10.0.15; Npgsql 10.0.4; MongoDB.Driver 3.14.1; StackExchange.Redis 3.4.35; AspNetCore.HealthChecks.NpgSql/MongoDb/Redis 9.0.0; Serilog.AspNetCore 10.0.0; OpenTelemetry 1.21.0; Scalar.AspNetCore 3.2.0; xunit.v3 4.0.3; Testcontainers 4.17.0; NetArchTest.Rules 1.3.2.
+- **Problemas:**
+  - A especificação 000 ainda não existia quando o pedido da F1 chegou; a implementação parou até o `/spec 000` ser aprovado.
+  - A regra de permissões `Edit(results/**)` (para os CSV de `results/`) também bloqueou a pasta `Application/Abstractions/Results/`, porque o Windows não distingue maiúsculas nos caminhos. Os tipos `Result` e `Error` ficaram diretamente em `Application/Abstractions/`.
+  - Analisadores com avisos como erros: CA1716 (`Error` é palavra reservada noutras linguagens; suprimido com justificação, porque o nome vem da especificação) e CA1000 (métodos estáticos em `Result<T>`; as fábricas passaram para `Result`). Nos testes, CA1716 obrigou a renomear `tests/Shared` para `tests/Common` e CA1711 a renomear as classes de coleção para `*CollectionDefinition`.
+  - Conflitos de nomes em C#: `TestResult` (NetArchTest e xUnit) e propriedades `Domain`/`Application` que colidiam com os espaços de nomes `SmartParking.*`.
+  - O SDK 10 recusa o VSTest com o xUnit v3 4.x («Testing with VSTest target is no longer supported»). Passou-se para o Microsoft.Testing.Platform no `global.json` e retiraram-se `Microsoft.NET.Test.Sdk` e `xunit.runner.visualstudio`, que deixaram de ser precisos. O comando passa a ser `dotnet test --solution SmartParking.slnx` (ou `dotnet test` na raiz).
+  - `hooks/post-test-analyze.sh`, referido em `.claude/rules/hooks.md`, não existe no repositório; os testes correram sem ele.
+  - `detect_antipatterns` (Roslyn) reportou 24 ocorrências, todas em código gerado em `obj/` (ponto de entrada do xUnit, gerador do OpenAPI) ou em métodos de teste xUnit sem parâmetro `CancellationToken` (usam `TestContext.Current.CancellationToken`). Nenhuma em código de `src/`.
+  - Depois de parar a Api com `TaskStop`, o processo `SmartParking.Api` ficou órfão na porta 5080 e foi terminado à mão.
+- **Decisões:**
+  - Prevalece a especificação 000 sobre o pedido inicial; o ADR 0002 foi acrescentado (Diogo, 2026-11-24).
+  - `Infrastructure/Hosting/` para a fundação web partilhada (Diogo, 2026-11-24; ADR 0002).
+  - Pacotes Microsoft na linha 10.x (`Serilog.AspNetCore` 10.0.0 e não 11.0.0, que segue a linha do .NET 11).
+  - Npgsql 10.0.4 referenciado diretamente para não herdar o 8.x mínimo exigido pelo AspNetCore.HealthChecks.NpgSql.
+  - `Persistence:Mode` guardado como texto e validado com uma mensagem que nomeia a chave; comparação exata (`hybrid` e `0` são rejeitados).
+  - O JSON de `/health/ready` leva só o estado e a duração de cada verificação, sem as mensagens das exceções (podem conter nomes de máquinas e credenciais).
+  - `appsettings.json` sem palavras-passe; as credenciais chegam por variáveis de ambiente (`ConnectionStrings__Postgres`, `__Mongo`, `__Redis`) ou `dotnet user-secrets`.
+  - EF Core fica para a F2, com o primeiro `DbContext`.
+- ***Commits:*** `81878b7` (Application), `a964587` (Infrastructure), `5ed209f` (Api e Workers), documentação no commit seguinte.
