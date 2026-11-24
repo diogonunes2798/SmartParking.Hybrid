@@ -50,3 +50,20 @@ Formato de cada entrada:
   - Detalhe e alternativas: `docs/adr/0001-infraestrutura-local.md`.
   - TODO(Diogo): indicar a fase do plano a que esta entrada pertence e a decisão D e a secção da tese do ADR 0001.
 - ***Commits:*** `115254c`.
+
+## Ponto 7b: ordem das fases e especificações
+
+- **Data:** 2026-11-24
+- **Feito:**
+  - Ordem das 13 fases (F1 a F13) fixada em `docs/specs/README.md`, com os princípios da divisão, os requisitos e objetivos de cada fase, a secção da tese e as dependências entre fases.
+  - Reservados os números das especificações 000 a 012 (estado «Por especificar»): o `/spec` do *kit* é interativo e só o Diogo aprova, por isso nenhuma especificação foi escrita nesta sessão.
+  - `docs/RASTREABILIDADE.md`: colunas «UC» e «Especificação» preenchidas a partir da tabela de fases.
+- **Problemas:**
+  - O texto de origem (plano da tese) chegou cortado no princípio sobre as medições («quando os dois modos (híbrido e monolítico) estão»); completou-se com «implementados, isto é, depois de F9». TODO(Diogo): confirmar.
+  - Com as Tabelas 12 a 14 (resumo acrescentado a `docs/RASTREABILIDADE.md`), a coluna «UC» passou a seguir a tese: RF-01 liga a UC-01 e UC-05, RNF-01 a UC-01, UC-02 e UC-03. RNF-02, RNF-03, RNF-05 e RNF-06 não têm UC na Tabela 14 e ficam com «—».
+- **Decisões:**
+  - A numeração das especificações segue a ordem das fases (F*n* ↔ especificação *n*−1), e não a ordem de criação prevista pelo *kit*.
+  - Estado novo «Por especificar» antes de Rascunho, para distinguir um número reservado de uma especificação em curso.
+  - Dependências entre fases propostas (coluna «Depende de»); confirmam-se no `/spec` de cada fase.
+  - A entrada «Infraestrutura local» acima pertence a F1 (fundação da solução). TODO(Diogo): confirmar.
+- ***Commits:*** por preencher.
