@@ -116,4 +116,4 @@ Formato de cada entrada:
   - O JSON de `/health/ready` leva só o estado e a duração de cada verificação, sem as mensagens das exceções (podem conter nomes de máquinas e credenciais).
   - `appsettings.json` sem palavras-passe; as credenciais chegam por variáveis de ambiente (`ConnectionStrings__Postgres`, `__Mongo`, `__Redis`) ou `dotnet user-secrets`.
   - EF Core fica para a F2, com o primeiro `DbContext`.
-- ***Commits:*** `81878b7` (Application), `a964587` (Infrastructure), `5ed209f` (Api e Workers), documentação no commit seguinte.
+- ***Commits:*** `81878b7` (Application), `a964587` (Infrastructure), `5ed209f` (Api e Workers), `6e9043e` (documentação).
