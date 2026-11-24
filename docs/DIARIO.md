@@ -66,4 +66,4 @@ Formato de cada entrada:
   - Estado novo «Por especificar» antes de Rascunho, para distinguir um número reservado de uma especificação em curso.
   - Dependências entre fases propostas (coluna «Depende de»); confirmam-se no `/spec` de cada fase.
   - A entrada «Infraestrutura local» acima pertence a F1 (fundação da solução). TODO(Diogo): confirmar.
-- ***Commits:*** por preencher.
+- ***Commits:*** `96feec4`.
