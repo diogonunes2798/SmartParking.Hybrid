@@ -56,3 +56,15 @@ Estado: «por preencher» até existir uma especificação aprovada que cubra o 
 | RNF-04 | UC-05 | por preencher | 007-simulador-esquema (F8) | por preencher | por preencher | por preencher |
 | RNF-05 | — | por preencher | 009-ciclo-de-vida (F10) | por preencher | por preencher | por preencher |
 | RNF-06 | — | por preencher | 010-seguranca (F11) | por preencher | por preencher | por preencher |
+
+### Critérios transversais (sem RF/RNF próprio)
+
+A especificação 000 (F1, aprovada a 2026-11-24) não responde a nenhum RF ou RNF da tese: prepara a fundação comum (OE6, secção 5.9.1). Os seus critérios ficam aqui, fora da matriz, para não inflacionar a Tabela 17.
+
+| Especificação | AC-n | Tema | Código | Teste | Estado |
+|---|---|---|---|---|---|
+| 000-visao-geral (F1) | AC-1 a AC-3 | Regras de arquitetura (camadas, subcamadas E1, D10) | por preencher | por preencher | especificado |
+| 000-visao-geral (F1) | AC-4 a AC-9 | *Health checks* e `Persistence:Mode` | por preencher | por preencher | especificado |
+| 000-visao-geral (F1) | AC-10 a AC-13 | ProblemDetails, Result, validação, OpenAPI | por preencher | por preencher | especificado |
+| 000-visao-geral (F1) | AC-14 | Imagens dos Testcontainers iguais às do `compose.yaml` | por preencher | por preencher | especificado |
+| 000-visao-geral (F1) | AC-15, AC-16 | Documentais: ADR 0003 e compilação limpa | por preencher | `/verify` | especificado |

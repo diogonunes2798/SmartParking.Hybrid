@@ -67,3 +67,20 @@ Formato de cada entrada:
   - Dependências entre fases propostas (coluna «Depende de»); confirmam-se no `/spec` de cada fase.
   - A entrada «Infraestrutura local» acima pertence a F1 (fundação da solução). Confirmado pelo Diogo a 2026-11-24.
 - ***Commits:*** `96feec4`.
+
+## F1: especificação 000 (visão geral e fundação)
+
+- **Data:** 2026-11-24
+- **Feito:**
+  - `/spec 000` em cinco rondas de perguntas; especificação `docs/specs/000-visao-geral.md` aprovada pelo Diogo a 2026-11-24, com AC-1 a AC-16 (AC-15 e AC-16 documentais).
+  - Decisões D1–D10 registadas a partir da secção 5 do plano da tese, colada pelo Diogo.
+  - Índice das especificações e `docs/RASTREABILIDADE.md` atualizados (critérios transversais fora da matriz RF/RNF).
+- **Problemas:**
+  - O repositório não tinha o enunciado de D1, D4, D5, D7 e D8; foi pedido ao Diogo em vez de deduzido.
+  - Uma pergunta da ronda 4 afirmou, por engano, que o repositório não tinha remoto (tem `origin` no GitHub). A resposta (CI fora da F1) não dependia disso.
+- **Decisões:**
+  - Âmbito da 000: visão geral curta, D1–D10, esqueleto executável e ADR 0003.
+  - D1–D9 diferidas com o valor da tese v16 por omissão; gatilho de revisão: confirmação de quem decide.
+  - Fora da F1: exportador CSV (F12), `tools/` (nas suas fases), autenticação e HTTPS (F11), integração contínua.
+  - Testes: ArchitectureTests, Api.Tests, Workers.Tests e um único UnitTests; Testcontainers com as imagens do `compose.yaml`; avisos tratados como erros.
+- ***Commits:*** por preencher.
