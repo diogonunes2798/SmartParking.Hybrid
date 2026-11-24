@@ -18,11 +18,9 @@ internal sealed class ParkingFacilityConfiguration : IEntityTypeConfiguration<Pa
 
     public void Configure(EntityTypeBuilder<ParkingFacility> builder)
     {
-        builder.ToTable("parking_facilities", table =>
-        {
-            table.HasCheckConstraint("ck_parking_facilities_latitude", "ST_Y(location::geometry) BETWEEN -90 AND 90");
-            table.HasCheckConstraint("ck_parking_facilities_longitude", "ST_X(location::geometry) BETWEEN -180 AND 180");
-        });
+        // No latitude/longitude CHECK: geography silently coerces out-of-range input into range (only a NOTICE),
+        // so such a CHECK could never fail. The range is enforced by GeoCoordinate and the request validator.
+        builder.ToTable("parking_facilities");
 
         builder.HasKey(facility => facility.Id);
         builder.Property(facility => facility.Id).ValueGeneratedNever();

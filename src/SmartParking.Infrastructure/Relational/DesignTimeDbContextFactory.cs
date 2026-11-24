@@ -1,4 +1,3 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
 namespace SmartParking.Infrastructure.Relational;
@@ -21,10 +20,6 @@ internal sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<S
                 $"Set {ConnectionStringVariable} to the owner connection string (user smartparking) before running dotnet ef.");
         }
 
-        var options = new DbContextOptionsBuilder<SmartParkingDbContext>()
-            .UseNpgsql(connectionString, npgsql => npgsql.UseNetTopologySuite())
-            .Options;
-
-        return new SmartParkingDbContext(options);
+        return RelationalDatabase.CreateOwnerContext(connectionString);
     }
 }
