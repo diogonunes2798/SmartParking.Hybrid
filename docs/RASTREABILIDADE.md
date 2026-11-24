@@ -49,7 +49,7 @@ Estado: «por preencher» até existir uma especificação aprovada que cubra o 
 | RF-03 | UC-03 | por preencher | 004-disponibilidade (F5) | por preencher | por preencher | por preencher |
 | RF-04 | UC-03 | por preencher | 004-disponibilidade (F5) | por preencher | por preencher | por preencher |
 | RF-05 | UC-04 | por preencher | 006-analitica (F7) | por preencher | por preencher | por preencher |
-| RF-06 | UC-02, UC-05 | por preencher | 001-configuracao (F2) | por preencher | por preencher | por preencher |
+| RF-06 | UC-02, UC-05 | AC-1 a AC-6, AC-12, AC-17, AC-18, AC-21, AC-22 (F2a); AC-7 a AC-9, AC-11, AC-13 a AC-16, AC-23 (F2b) | 001-configuracao (F2a, F2b); plano [001a](plans/001a-dominio-esquema-parques.md) | por preencher | por preencher | em implementação (F2a) |
 | RNF-01 | UC-01, UC-02, UC-03 | por preencher | 005-sincronizacao (F6, UC-01); 011-medicoes (F12, os três UC) | por preencher | por preencher | por preencher |
 | RNF-02 | — | por preencher | 011-medicoes (F12) | por preencher | por preencher | por preencher |
 | RNF-03 | — | por preencher | 011-medicoes (F12) | por preencher | por preencher | por preencher |
