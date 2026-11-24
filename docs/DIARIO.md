@@ -22,4 +22,4 @@ Formato de cada entrada:
   - Esqueleto da documentação: índices de `docs/specs/`, `docs/plans/` e `docs/adr/`, `docs/RASTREABILIDADE.md`, este diário, `results/` e `bench/`.
 - **Problemas:** por preencher.
 - **Decisões:** por preencher.
-- ***Commits:*** `5fca546`, `2720bab`, `9fb74d3`, `6f8d1b7`; o *commit* do esqueleto da documentação está por registar.
+- ***Commits:*** `5fca546`, `2720bab`, `9fb74d3`, `6f8d1b7`, `743000e` (esqueleto da documentação).
