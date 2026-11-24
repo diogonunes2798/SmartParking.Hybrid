@@ -137,4 +137,4 @@ Formato de cada entrada:
   - Teste novo do AC-7 com o Redis parado a meio: 503 com `redis` em `Unhealthy` e resposta abaixo do dobro do *timeout* configurado. Não foi confirmado que este teste falharia com a implementação anterior (o limite de 5 s do cliente também ficava abaixo do dobro de 3 s); garante só que a resposta não fica pendurada.
   - ADR 0002: o espaço de nomes raiz e `Messaging/` ficam de fora das regras de isolamento, por desenho; a regra de `Messaging/` define-se na F3/F4.
   - Não alterados: a personalização do `traceId` (redundante com o *default* do ASP.NET Core, mas explícita); a igualdade por referência do dicionário em `Error` (sem uso que dependa dela); o exportador CSV (F12, fora da 000).
-- ***Commits:*** `902678c` (correções e testes); documentação no commit seguinte.
+- ***Commits:*** `902678c` (correções e testes), `1b7ce9a` (documentação).
