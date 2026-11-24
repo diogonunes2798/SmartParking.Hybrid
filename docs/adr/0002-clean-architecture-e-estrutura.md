@@ -18,6 +18,7 @@ O protótipo tem de servir duas implementações de persistência (híbrida e mo
 - Infrastructure é um só projeto (E1), com uma subpasta por subcamada: `Relational/` (PostgreSQL), `Documents/` (MongoDB), `Cache/` (Redis) e `Messaging/` (barramento). `AddInfrastructure` lê `Persistence:Mode`, valida-o no arranque e chama um método de registo por modo. Na F1 só regista as ligações e os *health checks*: `postgres` nos dois modos, `mongo` e `redis` só no modo `Hybrid`.
 - **Desvio à estrutura do `CLAUDE.md`:** uma quinta subpasta, `Infrastructure/Hosting/`, guarda a fundação web partilhada pela Api e pelos Workers: `IEndpointGroup` e `MapEndpoints()`, os *endpoints* `/health/live` e `/health/ready`, o tratamento global de exceções com ProblemDetails, o Serilog e o OpenTelemetry. Por isso, Infrastructure tem uma `FrameworkReference` a `Microsoft.AspNetCore.App`. Aprovado pelo Diogo a 2026-11-24.
 - O isolamento é verificado por testes de arquitetura (`tests/SmartParking.ArchitectureTests`): Relational não usa MongoDB, Redis nem Hosting; Documents e Cache não usam EF Core, a outra subcamada, Relational nem Hosting; Application não usa nenhuma biblioteca de persistência.
+- Ficam de fora das regras de isolamento, por desenho: o espaço de nomes raiz (`DependencyInjection`, `PersistenceOptions`, `HealthCheckTags`), que compõe as subcamadas por modo, e `Messaging/`, que na F1 não tem código e vai combinar a *outbox* em PostgreSQL com o Redis Streams (D2). A regra de `Messaging/` define-se na F3/F4, quando existir a implementação.
 
 ## Alternativas consideradas
 

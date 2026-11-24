@@ -117,3 +117,24 @@ Formato de cada entrada:
   - `appsettings.json` sem palavras-passe; as credenciais chegam por variáveis de ambiente (`ConnectionStrings__Postgres`, `__Mongo`, `__Redis`) ou `dotnet user-secrets`.
   - EF Core fica para a F2, com o primeiro `DbContext`.
 - ***Commits:*** `81878b7` (Application), `a964587` (Infrastructure), `5ed209f` (Api e Workers), `6e9043e` (documentação).
+
+## F1: verificação e revisão independente
+
+- **Data:** 2026-11-24
+- **Feito:**
+  - `/verify` do *kit* (7 fases): build PASS (0 erros, 0 avisos); diagnósticos PASS; antipadrões WARN (só código gerado em `obj/` e métodos de teste xUnit); testes PASS; segurança PASS (nenhum pacote vulnerável, incluindo transitivos); format PASS; diff PASS. Veredicto: pronto para revisão.
+  - Revisão independente do diff por um subagente (`code-reviewer`), sem acesso de escrita. Sem achados críticos nem violações das regras do projeto; dois achados médios e quatro de precisão dos testes, corrigidos abaixo.
+  - Depois das correções: 41 testes a passar, build e format limpos.
+- **Problemas (achados da revisão):**
+  - O *health check* do Redis (pacote AspNetCore.HealthChecks.Redis) criava a ligação com `ConnectionMultiplexer.Connect` síncrono dentro da verificação, e o `PingAsync` não observava o *token*. O *timeout* configurado não limitava a resposta: o limite real era o `connectTimeout`/`asyncTimeout` do cliente (5 s por omissão).
+  - `AddApplication()` na Api só varria Application: um validador escrito na Api nunca seria registado e o erro só apareceria no pedido (500).
+  - O caso «`Persistence:Mode` ausente» do AC-9 testava, na prática, um valor vazio: o WebApplicationFactory passa `UseSetting(null)` como argumento vazio e o `appsettings.json` traz sempre um modo.
+  - O AC-7 só cobria «Redis parado antes do arranque», não «Redis para com o *host* a correr».
+- **Decisões:**
+  - `Cache/RedisConnection` (multiplexador ligado com `ConnectAsync` no primeiro uso) e `Cache/RedisHealthCheck` (cada espera com `WaitAsync(cancellationToken)`). O pacote AspNetCore.HealthChecks.Redis saiu.
+  - A Api passa a chamar `AddApplication(typeof(Program).Assembly)`.
+  - AC-9 «ausente» testado num *host* sem secção `Persistence` (`Host.CreateEmptyApplicationBuilder` + `AddInfrastructure` + `StartAsync`); o caso `null` saiu das *theories*. Workers.Tests com os mesmos valores inválidos da Api (`hybrid`, `0`).
+  - Teste novo do AC-7 com o Redis parado a meio: 503 com `redis` em `Unhealthy` e resposta abaixo do dobro do *timeout* configurado. Não foi confirmado que este teste falharia com a implementação anterior (o limite de 5 s do cliente também ficava abaixo do dobro de 3 s); garante só que a resposta não fica pendurada.
+  - ADR 0002: o espaço de nomes raiz e `Messaging/` ficam de fora das regras de isolamento, por desenho; a regra de `Messaging/` define-se na F3/F4.
+  - Não alterados: a personalização do `traceId` (redundante com o *default* do ASP.NET Core, mas explícita); a igualdade por referência do dicionário em `Error` (sem uso que dependa dela); o exportador CSV (F12, fora da 000).
+- ***Commits:*** `902678c` (correções e testes); documentação no commit seguinte.
