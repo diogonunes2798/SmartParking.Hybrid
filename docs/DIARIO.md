@@ -83,4 +83,4 @@ Formato de cada entrada:
   - D1–D9 diferidas com o valor da tese v16 por omissão; gatilho de revisão: confirmação de quem decide.
   - Fora da F1: exportador CSV (F12), `tools/` (nas suas fases), autenticação e HTTPS (F11), integração contínua.
   - Testes: ArchitectureTests, Api.Tests, Workers.Tests e um único UnitTests; Testcontainers com as imagens do `compose.yaml`; avisos tratados como erros.
-- ***Commits:*** por preencher.
+- ***Commits:*** `c3de3e1`.
