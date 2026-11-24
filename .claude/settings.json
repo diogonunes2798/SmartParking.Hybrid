@@ -1,0 +1,10 @@
+{
+  "enabledPlugins": {
+    "dotnet-claude-kit@dotnet-claude-kit": true
+  },
+  "permissions": {
+    "deny": [
+      "Edit(results/**)"
+    ]
+  }
+}
