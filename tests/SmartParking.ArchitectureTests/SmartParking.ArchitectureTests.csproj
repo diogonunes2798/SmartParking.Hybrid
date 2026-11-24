@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SmartParking.Domain\SmartParking.Domain.csproj" />
+    <ProjectReference Include="..\..\src\SmartParking.Application\SmartParking.Application.csproj" />
+    <ProjectReference Include="..\..\src\SmartParking.Infrastructure\SmartParking.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NetArchTest.Rules" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Common\ContainerImages.cs" Link="Common\ContainerImages.cs" />
+  </ItemGroup>
+
+</Project>

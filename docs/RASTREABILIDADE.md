@@ -63,8 +63,8 @@ A especificação 000 (F1, aprovada a 2026-11-24) não responde a nenhum RF ou R
 
 | Especificação | AC-n | Tema | Código | Teste | Estado |
 |---|---|---|---|---|---|
-| 000-visao-geral (F1) | AC-1 a AC-3 | Regras de arquitetura (camadas, subcamadas E1, D10) | por preencher | por preencher | especificado |
-| 000-visao-geral (F1) | AC-4 a AC-9 | *Health checks* e `Persistence:Mode` | por preencher | por preencher | especificado |
-| 000-visao-geral (F1) | AC-10 a AC-13 | ProblemDetails, Result, validação, OpenAPI | por preencher | por preencher | especificado |
-| 000-visao-geral (F1) | AC-14 | Imagens dos Testcontainers iguais às do `compose.yaml` | por preencher | por preencher | especificado |
-| 000-visao-geral (F1) | AC-15, AC-16 | Documentais: ADR 0003 e compilação limpa | por preencher | `/verify` | especificado |
+| 000-visao-geral (F1) | AC-1 a AC-3 | Regras de arquitetura (camadas, subcamadas E1, D10) | `src/*` (dependências), `Infrastructure/{Relational,Documents,Cache}` | `ArchitectureTests/Features/LayerDependencyTests`, `SublayerIsolationTests` | a passar |
+| 000-visao-geral (F1) | AC-4 a AC-9 | *Health checks* e `Persistence:Mode` | `Infrastructure/Hosting/HealthEndpoints.cs`, `Infrastructure/DependencyInjection.cs`, `PersistenceOptions.cs` | `Api.Tests/Features/Health`, `Configuration`; `Workers.Tests/Features` | a passar |
+| 000-visao-geral (F1) | AC-10 a AC-13 | ProblemDetails, Result, validação, OpenAPI | `Infrastructure/Hosting/GlobalExceptionHandler.cs`, `Api/Common/`, `Api/Program.cs` | `Api.Tests/Features/Errors`, `Validation`, `OpenApi` | a passar |
+| 000-visao-geral (F1) | AC-14 | Imagens dos Testcontainers iguais às do `compose.yaml` | `tests/Common/ContainerImages.cs` | `ArchitectureTests/Features/ContainerImagesTests` | a passar |
+| 000-visao-geral (F1) | AC-15, AC-16 | Documentais: ADR 0003 e compilação limpa | `docs/adr/0003-repository-por-raiz-de-agregado.md` | `dotnet build -warnaserror` e `dotnet format --verify-no-changes` corridos à mão (2026-11-24); `/verify` por correr | verificado à mão |
