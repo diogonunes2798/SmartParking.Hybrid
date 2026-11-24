@@ -49,4 +49,4 @@ Formato de cada entrada:
   - Redis com AOF ligado (não é fonte de verdade, mas evita reconstruir a cada reinício).
   - Detalhe e alternativas: `docs/adr/0001-infraestrutura-local.md`.
   - TODO(Diogo): indicar a fase do plano a que esta entrada pertence e a decisão D e a secção da tese do ADR 0001.
-- ***Commits:*** por registar (alterações ainda não commitadas).
+- ***Commits:*** `115254c`.
