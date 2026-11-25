@@ -60,11 +60,11 @@ public sealed class OpenSessionWithReservationTests(ApiFixture fixture)
     }
 
     [Theory]
-    [InlineData("1 us before the early-arrival margin")]
-    [InlineData("1 us after the grace period")]
-    [InlineData("another vehicle")]
-    [InlineData("another spot")]
-    public async Task Open_WithReservation_Fails409AndWritesNothing_AC25(string condition)
+    [InlineData("1 us before the early-arrival margin", "Session.OutsideFulfilmentWindow")]
+    [InlineData("1 us after the grace period", "Session.OutsideFulfilmentWindow")]
+    [InlineData("another vehicle", "Session.ReservationMismatch")]
+    [InlineData("another spot", "Session.ReservationMismatch")]
+    public async Task Open_WithReservation_Fails409AndWritesNothing_AC25(string condition, string expectedCode)
     {
         // Arrange
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -99,6 +99,7 @@ public sealed class OpenSessionWithReservationTests(ApiFixture fixture)
         // Assert
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains(expectedCode, await response.Content.ReadAsStringAsync(cancellationToken), StringComparison.Ordinal);
         await AssertNothingWrittenAsync(reservationId, vehicleId, cancellationToken);
     }
 
