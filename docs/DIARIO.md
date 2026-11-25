@@ -344,3 +344,44 @@ Formato de cada entrada:
   5. *Nit*: `FindSystemTimeZoneById` em cada abertura (o .NET guarda-o em cache).
   6. *Nit*: com `[opensAt, closesAt)` e `opensAt < closesAt`, um parque aberto 24 h não se representa (o último segundo do dia fica fechado); é coerente com a especificação 001. Ponto a considerar numa revisão futura da especificação.
 - ***Commits:*** `f8f8d21`, `b39a6b3`, `ef4b139`, `ca0e141`, `7a4d524`, `6706c4b`, `a5c9a32`.
+
+## F3b: reservas e *worker* de expiração (especificação 002)
+
+- **Data:** 2026-11-25
+- **Feito:**
+  - Plano aprovado pelo Diogo ([002b](plans/002b-reservas-worker.md)), com os pontos 1 a 3 e as propostas 4 a 15. Mesmo ramo da F3a (`feat/002-sessoes-pagamentos`).
+  - Ciclo da reserva no Domain (`Reserve`, `Cancel`, `Fulfil`, `Expire`) e `ReservationPolicy`, com a janela de cumprimento fechada nos dois extremos e a expiração estritamente depois dela; `FitsInOneOpeningInterval` sobre o `IsOpenAt`, com `endsAt − 1 µs`.
+  - Cumprimento na transação da abertura (um `SessionOpened.v1`, duas auditorias com o mesmo `outboxMessageId` e o mesmo `xmin`) e proteção do lugar numa consulta compilada; sai o 409 temporário `Session.ReservationNotSupported` da F3a ([ADR 0007](adr/0007-reservas-cumprimento-e-expiracao.md)).
+  - *Endpoints* `/api/reservations` (criar, consultar, cancelar), com o `23P01` traduzido para `Reservation.Overlaps`; configuração `Reservations:*` validada no arranque nos dois modos.
+  - *Worker* de expiração, o primeiro *background service* do projeto: uma passagem ao arrancar e depois a cada `ExpiryScanSeconds`, uma transação por reserva, actor `system`, conflito de `xmin` contado e ignorado. Os Workers passam a ligar como `smartparking_workers`, membro de `smartparking_app`, o que fecha o ponto em aberto da F2; o `scripts/db-app-user.sh` cria os dois logins.
+  - Testes: AC-22 a AC-30 e as quatro transições de reserva do AC-21 (criar, cancelar e abrir com reserva na Api; expirar nos Workers); 384 testes a passar em duas corridas seguidas (304 antes da F3b).
+  - Verificação manual contra o `compose.yaml`, com a Api como `smartparking_api` e os Workers como `smartparking_workers` (tolerância 0 e uma passagem a cada 10 s, só nesta corrida): os 18 pedidos do percurso deram os códigos esperados (incluindo 201 a abrir com reserva, 409 a cancelar de novo, 400 no passado e 409 na sobreposição). Na base: a reserva expirada tem auditoria com actor `system` e um `ReservationExpired.v1` por publicar; o cumprimento deixou duas auditorias no `SessionOpened.v1`; nenhuma mensagem órfã; o `pg_stat_activity` mostra `smartparking_api` e `smartparking_workers` (além da sessão do `psql`).
+  - Roslyn: dependências só para dentro; `ICurrentActor` = `SystemCurrentActor` nos Workers e `AnonymousCurrentActor` na Api; portas novas iguais nos dois modos, sem duplicados nem dependências cativas; 0 diagnósticos. O `detect_antipatterns` só assinalou métodos de teste e o repositório de escrita com *tracking* intencional.
+  - Testes de mutação (com cópia de segurança do ficheiro não versionado antes de começar):
+    - sem a reserva nas entidades alteradas do `SessionOpened`, o AC-25 falha (uma só auditoria da reserva);
+    - com a janela aberta no fim (`<` em vez de `≤`), o caso «no extremo exato da tolerância» falha;
+    - parar a passagem no primeiro conflito (`break` em vez de `continue`) faz falhar o caso de conflito do AC-28;
+    - sem a conversão 412 → 409 no `CancelReservation`, o teste novo do cancelamento que perde falha (ver «Problemas»).
+- **Problemas:**
+  - O teste do *host* com a base inacessível falhou à primeira: o EF Core embrulha a falha de ligação numa `InvalidOperationException` («transient failure») cuja causa é a `NpgsqlException`, e o *worker* só apanhava `DbException`, por isso parava. Passou a apanhar também esse caso, com um filtro sobre a exceção interna (sem `catch (Exception)`).
+  - Duas mutações do plano sobreviveram à primeira:
+    - «uma só unidade de trabalho para toda a passagem» não faz falhar o AC-28, porque a unidade de trabalho já limpa o *change tracker* depois de uma gravação falhada (F2). A premissa do plano estava errada; a mutação que de facto viola o AC-28 é parar a passagem no conflito, e essa é apanhada. As transações por *scope* ficam como defesa;
+    - «sem a conversão 412 → 409 no cancelamento» passou quatro vezes: na corrida do AC-27 o `UPDATE` do cancelamento chega sempre primeiro ao bloqueio da linha, por isso o ramo «o cancelamento perde» nunca corria. Acrescentou-se um teste determinístico (o gancho pós-leitura altera a linha entre a leitura e a gravação do cancelamento), que apanha a mutação.
+  - Um *heredoc* voltou a ficar pendurado no Git Bash (lição já registada); foi parado e os ficheiros foram escritos diretamente.
+  - Desta vez o `TaskStop` não deixou processos órfãos da Api nem dos Workers (confirmado pelo nome).
+- **Decisões:**
+  - Pontos 1 a 3 e propostas 4 a 15 do plano 002b, aprovados com ele; ADR 0007.
+  - Desvios ao plano, com a razão:
+    - o conflito de `xmin` do AC-28 é provocado por um decorador do `IReservationRepository` (`AfterReadReservationRepository`, que corre uma ação logo depois de ler a reserva escolhida) e não por um decorador da unidade de trabalho, que não sabe que reserva está a gravar;
+    - `Reservation.Cancel()` sem `now`, que não era usado; `Reservation.CanBeFulfilledBy` público, para o *handler* e o Domain verificarem a mesma regra;
+    - o `Fulfil` é testado através do `ParkingSession.Open`, porque o Domain não expõe os internos aos testes;
+    - os pedidos de reserva do `sessions.http` e o prefixo `/api/reservations` do `HttpFileTests` entraram no passo 6 e não no 13, porque o AC-20 falhava sem eles;
+    - o *host* `Hooked` da Api, com o mesmo gancho, para o teste do cancelamento que perde.
+- **Revisão independente** (`code-reviewer`, só leitura, sobre `git diff 9f41f33...HEAD`): sem erros contra a especificação nem contra o plano nos pontos verificados. Achados, por tratar com o acordo do Diogo:
+  1. Uma falha da base de dados durante a gravação (por exemplo, o PostgreSQL a reiniciar) chega como `DbUpdateException` com a `NpgsqlException` dentro, que o *worker* não apanha: o *host* dos Workers pararia, ao contrário do que o comentário promete. O teste atual só cobre a falha de ligação na listagem.
+  2. `FitsInOneOpeningInterval` só verifica os extremos: na mudança para a hora de inverno a hora 01:00–02:00 repete-se em Lisboa, e um parque com `opensAt` ou `closesAt` dentro dessa hora pode aceitar uma reserva que atravessa um período fechado. Impacto baixo.
+  3. A proteção do lugar é «verificar e depois agir», sem bloqueio: uma abertura sem reserva e uma criação de reserva concorrentes podem gravar as duas; e criar uma reserva não verifica se o lugar tem uma sessão aberta. A especificação não o pede; fica como limite conhecido ou bloqueio da linha do lugar.
+  4. O mesmo veículo a abrir sem `reservationId` dentro da sua janela (ponto 2 do plano) deixa a reserva `Active`, que depois expira: conta como não comparência nos relatórios do UC-04.
+  5. Testes: o caso negativo do AC-25 só verifica o 409, não o código do erro; os *hosts* criados por `CreateFactory` nos testes dos Workers correm o *worker* real com o relógio do sistema (inofensivo enquanto os testes correm em série e verificam por id).
+  6. *Nits*: o validador compara os instantes antes da normalização ao microssegundo; o `ListDueIdsAsync` não tem limite de lote; a mensagem de `Reservation.NotActive`.
+- ***Commits:*** `4f1b61b`, `3bf1248`, `fd1bf5f`, `9b84572`, `27040a3`, `6d2d73c`, `25b5489`, `41cf95d`, `b9fcac2`, `ed7debd`, `e09a33f`.
