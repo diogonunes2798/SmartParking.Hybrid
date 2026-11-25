@@ -60,6 +60,9 @@ internal static class RelationalRegistration
         services.AddScoped<IReservationRepository, ReservationRepository>();
         services.AddScoped<IReservationReader, ReservationReader>();
 
+        // Ingestion registry check (spec 003): one compiled query per batch, the same in both modes.
+        services.AddScoped<ISensorRegistryReader, SensorRegistryReader>();
+
         healthChecks.AddNpgSql(
             sp => sp.GetRequiredService<NpgsqlDataSource>(),
             name: HealthCheckName,
