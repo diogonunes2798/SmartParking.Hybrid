@@ -403,5 +403,5 @@ Formato de cada entrada:
   - O repositório continua sem integração contínua, por isso o PR não teve verificações automáticas: a garantia são os resultados locais (385 testes em duas corridas seguidas, build e format limpos) registados na descrição.
 - **Decisões:**
   - *Merge commit* em vez de *squash*: os *commits* da F3a e da F3b referidos neste diário continuam a existir na `main`.
-  - O ramo `feat/002-sessoes-pagamentos` ainda não foi apagado: fica à espera do pedido do Diogo, como na F1 e na F2.
+  - O ramo `feat/002-sessoes-pagamentos` foi apagado no `origin` e localmente, a pedido do Diogo, depois de se confirmar que estava integrado na `main` (`git merge-base --is-ancestor`), como na F1 e na F2. A cópia de trabalho principal passou para a `main`.
 - ***Commits:*** `b1d7e6e` (*merge* do PR #3); registo desta entrada no commit seguinte.
