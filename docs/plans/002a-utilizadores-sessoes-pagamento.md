@@ -1,7 +1,7 @@
 # Plano 002a — Utilizadores, sessões e pagamento (F3a)
 
 - **Especificação:** [002-sessoes-pagamentos](../specs/002-sessoes-pagamentos.md) (aprovada a 2026-11-25), secção «Implementação em duas partes»
-- **Estado:** Aprovado pelo Diogo (2026-11-25), tal como está, incluindo as decisões 1 a 4 e as propostas 5 a 12. Por implementar.
+- **Estado:** Aprovado pelo Diogo (2026-11-25), tal como está, incluindo as decisões 1 a 4 e as propostas 5 a 12. Implementado no ramo `feat/002-sessoes-pagamentos` (2026-11-25): 304 testes a passar, verificação, testes de mutação e revisão independente feitos (ver [diário](../DIARIO.md), F3a). Desvio: depois da revisão, a raiz que levanta um evento volta a ter sempre o `xmin` verificado (propostas 5 e 8; ADR 0006). Por integrar na `main`: o PR sai no fim da F3b.
 - **Requisitos:** UC-02 (estacionar e pagar); RF-02 (atomicidade das transições, falha a meio do pagamento, concorrência por `xmin`); RNF-06 (auditoria só por acréscimo, estendida às entidades alteradas)
 - **Ramo:** `feat/002-sessoes-pagamentos`, a partir da `main` (`60238a0`). A F3b continua no mesmo ramo; o PR para a `main` só sai no fim da F3b, com o OK do Diogo.
 - **Critérios desta parte:** AC-1 a AC-21. No AC-21, só as transições abrir, fechar, pagar e recusa.
