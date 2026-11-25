@@ -20,7 +20,7 @@ description: >
 
 ## Branch Naming
 
-- **DO** use prefixed branch names: `feature/`, `fix/`, `refactor/`.
+- **DO** name branches `<type>/<NNN>-<slug>`, where `<type>` is the Conventional Commits type (`feat/`, `fix/`, `refactor/`) and `<NNN>` is the spec number, e.g. `feat/001-configuracao`.
   Rationale: Prefixes make branch purpose obvious in listings and CI pipeline rules.
 
 - **DON'T** use personal or opaque branch names like `my-branch` or `wip`.

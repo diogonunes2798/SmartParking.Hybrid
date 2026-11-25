@@ -39,8 +39,8 @@ src/SmartParking.Infrastructure/            um só projeto (E1), uma subpasta po
   Messaging/                                IEventBus: leitor da outbox, Redis Streams
 src/SmartParking.Api/                       endpoints e ingestão; Program.cs mínimo
 src/SmartParking.Workers/                   projetores, publicação da outbox, agregação, retenção
-tools/SensorSimulator/                      gerador do cenário de referência (UC-01, UC-05)
-tools/ProjectionRebuilder/                  reconstrói o estado do Redis a partir do MongoDB (RNF-03)
+tools/SensorSimulator/                      gerador do cenário de referência (UC-01, UC-05); criado na F4
+tools/ProjectionRebuilder/                  reconstrói o estado do Redis a partir do MongoDB (RNF-03); criado na F6
 tests/                                      *.Tests com Features/ e Fixtures/ApiFixture.cs; SmartParking.ArchitectureTests
 bench/                                      cenários k6 e scripts de medição (Cap. 7)
 results/                                    CSV das experiências: versionados, nunca editados à mão
@@ -58,14 +58,14 @@ dotnet run --project src/SmartParking.Api
 dotnet run --project src/SmartParking.Workers
 dotnet ef migrations add <Nome> --project src/SmartParking.Infrastructure --startup-project src/SmartParking.Api
 dotnet ef database update --project src/SmartParking.Infrastructure --startup-project src/SmartParking.Api
-dotnet run --project tools/SensorSimulator -- --spots 5000 --mean-interval 300 --peak-factor 10 --seed 42
-./bench/run.sh <cenario> --mode hybrid|monolithic --runs 5   # escreve results/<cenario>/<AAAA-MM-DD_HHMM>.csv
+dotnet run --project tools/SensorSimulator -- --spots 5000 --mean-interval 300 --peak-factor 10 --seed 42   # a partir da F4
+./bench/run.sh <cenario> --mode hybrid|monolithic --runs 5   # ainda não existe; escreverá results/<cenario>/<AAAA-MM-DD_HHMM>.csv
 ```
 
 ## Regras de arquitetura
 
 - Dependências só para dentro: Domain ← Application ← Infrastructure, Api, Workers. Confirma com `get_project_graph` depois de mexer em referências.
-- Estrutura da infraestrutura (E1, decidida a 24-11-2026): um projeto `SmartParking.Infrastructure` com as subpastas `Relational/`, `Documents/`, `Cache/` e `Messaging/` (template de Clean Architecture do kit). O isolamento das subcamadas é garantido por testes de arquitetura (`tests/SmartParking.ArchitectureTests`): `Infrastructure.Relational` não usa `MongoDB.Driver` nem `StackExchange.Redis`; `Documents` e `Cache` não usam EF Core. Não cries projetos de infraestrutura separados sem perguntar.
+- Estrutura da infraestrutura (E1): um projeto `SmartParking.Infrastructure` com as subpastas `Relational/`, `Documents/`, `Cache/` e `Messaging/` (template de Clean Architecture do kit). O isolamento das subcamadas é garantido por testes de arquitetura (`tests/SmartParking.ArchitectureTests`): `Infrastructure.Relational` não usa `MongoDB.Driver` nem `StackExchange.Redis`; `Documents` e `Cache` não usam EF Core. Não cries projetos de infraestrutura separados sem perguntar.
 - Repartição dos dados (Tabela 15 da tese):
   - PostgreSQL: Parque, Lugar, Sensor (registo do dispositivo), Tarifário, Utilizador, Veículo, Meio de pagamento, Sessão, Reserva, Pagamento, auditoria e outbox;
   - MongoDB: eventos de ocupação e leituras ambientais;
@@ -74,7 +74,7 @@ dotnet run --project tools/SensorSimulator -- --spots 5000 --mean-interval 300 -
 - CQRS: os comandos escrevem no PostgreSQL (ou no registo de eventos, na ingestão). A disponibilidade (UC-03) lê só do Redis. Os relatórios (UC-04) leem só das tabelas de resumo. Nenhuma consulta de elevada frequência toca nas tabelas transacionais.
 - Sincronização: o evento de domínio vai para a outbox na mesma transação da alteração de negócio; os consumidores são idempotentes, porque a entrega é «pelo menos uma vez». Nunca uses transações distribuídas (2PC).
 - `Persistence:Mode=Hybrid|Monolithic` escolhe as implementações das portas. O modo monolítico (Cap. 7.5) guarda tudo em PostgreSQL e partilha Domain, Application e Api com o modo híbrido.
-- Repository (D10, decidida a 24-11-2026; tese 5.4.2 e 5.7). É uma exceção deliberada à regra do kit «No repository pattern over EF Core» (`.claude/rules/architecture.md`, já substituída pela exceção D10); a justificação fica no ADR 0003.
+- Repository (D10; tese 5.4.2 e 5.7; justificação no ADR 0003). Exceção deliberada à recomendação geral do kit de usar o `DbContext` diretamente, sem repositórios:
   - Escrita: um repositório por raiz de agregado, com a interface em `Application/Abstractions` e uma implementação por subcamada e por `Persistence:Mode`. Métodos de domínio (`GetByIdAsync`, `Add`…), sem devolver `IQueryable`.
   - O repositório não chama `SaveChanges`: o `DbContext` é a unidade de trabalho e grava a outbox na mesma transação. Por dentro, usa consultas compiladas e não esconde o change tracking.
   - Consultas: sem repositórios. Cada consulta usa uma porta de leitura própria em `Application/Abstractions` (por exemplo, `IAvailabilityReader`, `IReportReader`), implementada em Infrastructure com projeções e `AsNoTracking`, ou sobre o Redis e as tabelas de resumo.
@@ -133,7 +133,7 @@ dotnet run --project tools/SensorSimulator -- --spots 5000 --mean-interval 300 -
 
 ## Skills do kit a carregar
 
-`modern-csharp`, `clean-architecture`, `minimal-api`, `openapi`, `scalar`, `ef-core` (com a exceção D10: a sua regra «No repository wrappers» não se aplica aos repositórios por agregado), `caching`, `messaging`, `error-handling`, `configuration`, `dependency-injection`, `serilog`, `opentelemetry`, `testing`, `docker`, `workflow-mastery`.
+`modern-csharp`, `clean-architecture`, `minimal-api`, `openapi`, `scalar`, `ef-core` (com a exceção D10: a secção «Don't Wrap DbContext in a Repository» não se aplica aos repositórios por agregado do lado da escrita), `caching`, `messaging`, `error-handling`, `configuration`, `dependency-injection`, `serilog`, `opentelemetry`, `testing`, `docker`, `workflow-mastery`.
 
 ## MCP (cwm-roslyn-navigator)
 
