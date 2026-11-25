@@ -9,7 +9,7 @@ namespace SmartParking.Infrastructure.Relational.Auditing;
 /// <summary>
 /// JSON state of an aggregate for <c>audit_entries.before</c> and <c>.after</c>: the root's mapped properties
 /// plus its owned collections (for example the facility's opening hours), read from the change tracker.
-/// The row version (<c>xmin</c>) and the owner keys of owned rows are left out.
+/// The row version (<c>xmin</c>), the owner keys of owned rows and the <see cref="AuditExclusions"/> are left out.
 /// </summary>
 internal static class AuditSnapshot
 {
@@ -36,7 +36,9 @@ internal static class AuditSnapshot
 
         foreach (var property in entry.Metadata.GetProperties())
         {
-            if (property.IsConcurrencyToken || property.IsShadowProperty())
+            if (property.IsConcurrencyToken
+                || property.IsShadowProperty()
+                || AuditExclusions.IsExcluded(entry.Metadata.ClrType, property.Name))
             {
                 continue;
             }

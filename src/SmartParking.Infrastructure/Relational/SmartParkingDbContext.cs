@@ -16,8 +16,9 @@ namespace SmartParking.Infrastructure.Relational;
 
 /// <summary>
 /// Relational sublayer (PostgreSQL + PostGIS): the three aggregates of Table 15, the audit trail and the outbox.
-/// It is the unit of work (D10): one save writes the business change, one <see cref="AuditEntry"/> and one
-/// <see cref="OutboxMessage"/> per domain event, in one transaction (spec 001). Never 2PC.
+/// It is the unit of work (D10): one save writes the business change, one <see cref="OutboxMessage"/> per domain
+/// event and one <see cref="AuditEntry"/> per entity that event changed, in one transaction (spec 001, spec 002,
+/// ADR 0006). Never 2PC.
 /// </summary>
 internal sealed class SmartParkingDbContext(
     DbContextOptions<SmartParkingDbContext> options,
@@ -105,50 +106,81 @@ internal sealed class SmartParkingDbContext(
     };
 
     /// <summary>
-    /// Turns every pending domain event into an outbox message and an audit entry that points to it.
-    /// Runs before the save, so both rows join the business change in the same transaction.
+    /// Turns every pending domain event into one outbox message and one audit entry per entity the event changed,
+    /// all pointing to that message (ADR 0006). By default the changed entity is the raising root, which is the F2
+    /// behaviour. Runs before the save, so every row joins the business change in the same transaction.
     /// </summary>
     private void AppendAuditAndOutbox()
     {
         var now = clock.GetUtcNow();
         var traceId = Activity.Current?.TraceId.ToHexString();
 
-        foreach (var entry in ChangeTracker.Entries<AggregateRoot>().ToList())
+        foreach (var rootEntry in ChangeTracker.Entries<AggregateRoot>().ToList())
         {
+            var raisedEvents = rootEntry.Entity.DequeueRaisedEvents();
+
             // A change confined to owned rows in their own table (for example, only the opening hours) leaves the
             // root Unchanged: EF Core would neither check nor bump its xmin, so a stale ETag could overwrite it and
-            // the ETag would not change. Touching the root makes the UPDATE ... WHERE xmin = @original run.
-            if (entry.State == EntityState.Unchanged && entry.Entity.DomainEvents.Count > 0)
+            // the ETag would not change. Touching the root makes the UPDATE ... WHERE xmin = @original run. Only a
+            // root that one of its events declares as changed is touched (ADR 0006).
+            if (rootEntry.State == EntityState.Unchanged
+                && raisedEvents.Any(raised => raised.Changed.Any(entity => ReferenceEquals(entity, rootEntry.Entity))))
             {
-                entry.State = EntityState.Modified;
+                rootEntry.State = EntityState.Modified;
             }
 
-            foreach (var domainEvent in entry.Entity.DequeueDomainEvents())
+            foreach (var raised in raisedEvents)
             {
                 var message = new OutboxMessage
                 {
                     Id = Guid.CreateVersion7(now),
-                    Type = OutboxType(domainEvent),
-                    Payload = JsonSerializer.Serialize(domainEvent, domainEvent.GetType(), AuditSnapshot.JsonOptions),
+                    Type = OutboxType(raised.Event),
+                    Payload = JsonSerializer.Serialize(raised.Event, raised.Event.GetType(), AuditSnapshot.JsonOptions),
                     OccurredAt = now,
                     TraceId = traceId,
                 };
 
                 OutboxMessages.Add(message);
-                AuditEntries.Add(new AuditEntry
+
+                foreach (var entity in raised.Changed)
                 {
-                    Id = Guid.CreateVersion7(now),
-                    OccurredAt = now,
-                    Actor = actor.Name,
-                    EntityType = entry.Metadata.ClrType.Name,
-                    EntityId = entry.Entity.Id,
-                    Operation = OperationOf(entry),
-                    Before = AuditSnapshot.Before(entry),
-                    After = AuditSnapshot.After(entry),
-                    TraceId = traceId,
-                    OutboxMessageId = message.Id,
-                });
+                    var entry = TrackedEntry(entity, raised.Event);
+                    AuditEntries.Add(new AuditEntry
+                    {
+                        Id = Guid.CreateVersion7(now),
+                        OccurredAt = now,
+                        Actor = actor.Name,
+                        EntityType = entry.Metadata.ClrType.Name,
+                        EntityId = KeyOf(entry),
+                        Operation = OperationOf(entry),
+                        Before = AuditSnapshot.Before(entry),
+                        After = AuditSnapshot.After(entry),
+                        TraceId = traceId,
+                        OutboxMessageId = message.Id,
+                    });
+                }
             }
         }
+    }
+
+    /// <summary>The change tracker entry of a changed entity; the repository must have added or loaded it.</summary>
+    private EntityEntry TrackedEntry(object entity, IDomainEvent domainEvent)
+    {
+        var entry = Entry(entity);
+        return entry.State != EntityState.Detached
+            ? entry
+            : throw new InvalidOperationException(
+                $"{entity.GetType().Name}, changed by {domainEvent.GetType().Name}, is not tracked by the unit of work.");
+    }
+
+    /// <summary>Every audited entity has a single Guid primary key; non-root entities share no base type.</summary>
+    private static Guid KeyOf(EntityEntry entry)
+    {
+        var key = entry.Metadata.FindPrimaryKey()
+            ?? throw new InvalidOperationException($"{entry.Metadata.ClrType.Name} has no primary key.");
+
+        return key.Properties is [var property] && entry.Property(property.Name).CurrentValue is Guid id
+            ? id
+            : throw new InvalidOperationException($"{entry.Metadata.ClrType.Name} has no single Guid primary key.");
     }
 }
