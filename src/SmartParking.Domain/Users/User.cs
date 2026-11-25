@@ -6,8 +6,8 @@ namespace SmartParking.Domain.Users;
 /// <summary>
 /// Driver account and root of the user aggregate (vehicles and payment methods). Name and email are personal data:
 /// never log them at Information level or below. The vehicles and payment methods are not loaded with the user;
-/// their changes are raised here, with the child as the only changed entity (spec 002, ADR 0006), so the user row is
-/// not touched.
+/// their changes are raised here, with the child as the only changed entity, so each change has one audit entry
+/// (spec 002, ADR 0006).
 /// </summary>
 public sealed class User : AggregateRoot
 {

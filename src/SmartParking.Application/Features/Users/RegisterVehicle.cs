@@ -8,7 +8,7 @@ namespace SmartParking.Application.Features.Users;
 /// <summary>
 /// Registers a vehicle of a user (spec 002 AC-3). The licence plate is normalised (<c>aa-12 bb</c> → <c>AA12BB</c>);
 /// a repeated plate is refused by the unique index (409). The user raises <c>VehicleRegistered.v1</c> with the
-/// vehicle as the only changed entity: one audit entry, and the user row is not touched (ADR 0006).
+/// vehicle as the only changed entity: one audit entry, for the vehicle (ADR 0006).
 /// </summary>
 public static class RegisterVehicle
 {

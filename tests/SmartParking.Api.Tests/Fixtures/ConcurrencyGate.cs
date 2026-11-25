@@ -17,15 +17,34 @@ internal sealed class ConcurrencyGate
 
     private int participants;
 
+    /// <summary>
+    /// Holds the next <paramref name="participantCount"/> saves. Refuses to arm over a gate still pending, so a test that
+    /// failed without releasing it cannot hold or release the saves of the next one.
+    /// </summary>
     public void Arm(int participantCount)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(participantCount, 2);
 
         lock (gate)
         {
+            if (released is not null)
+            {
+                throw new InvalidOperationException("The concurrency gate is still armed; a previous test did not disarm it.");
+            }
+
             participants = participantCount;
             waiting = 0;
             released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+    }
+
+    /// <summary>Releases anyone waiting and lets every later save through. Call it in a <c>finally</c> after arming.</summary>
+    public void Disarm()
+    {
+        lock (gate)
+        {
+            released?.TrySetResult();
+            released = null;
         }
     }
 

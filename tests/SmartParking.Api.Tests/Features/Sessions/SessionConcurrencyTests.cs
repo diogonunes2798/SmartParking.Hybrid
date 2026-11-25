@@ -25,12 +25,11 @@ public sealed class SessionConcurrencyTests(ApiFixture fixture)
         var arranged = await SessionApi.ArrangeAsync(client, fixture.Clock, cancellationToken);
         var opened = await SessionApi.OpenOkAsync(client, arranged.SpotId, arranged.VehicleId, cancellationToken);
         fixture.Clock.Advance(TimeSpan.FromMinutes(40));
-        fixture.Gate.Arm(2);
 
         // Act
-        var responses = await Task.WhenAll(
-            SessionApi.CloseAsync(client, opened.Id, cancellationToken),
-            SessionApi.CloseAsync(client, opened.Id, cancellationToken));
+        var responses = await RaceAsync(
+            () => SessionApi.CloseAsync(client, opened.Id, cancellationToken),
+            () => SessionApi.CloseAsync(client, opened.Id, cancellationToken));
 
         // Assert
         var (winner, loser) = Split(responses);
@@ -51,12 +50,11 @@ public sealed class SessionConcurrencyTests(ApiFixture fixture)
         using var client = fixture.Gated.CreateClient();
         var arranged = await SessionApi.ArrangeAsync(client, fixture.Clock, cancellationToken);
         var closed = await SessionApi.ClosedSessionAsync(client, fixture.Clock, arranged, TimeSpan.FromMinutes(40), cancellationToken);
-        fixture.Gate.Arm(2);
 
         // Act
-        var responses = await Task.WhenAll(
-            SessionApi.PayAsync(client, closed.Id, arranged.PaymentMethodId, cancellationToken),
-            SessionApi.PayAsync(client, closed.Id, arranged.PaymentMethodId, cancellationToken));
+        var responses = await RaceAsync(
+            () => SessionApi.PayAsync(client, closed.Id, arranged.PaymentMethodId, cancellationToken),
+            () => SessionApi.PayAsync(client, closed.Id, arranged.PaymentMethodId, cancellationToken));
 
         // Assert: the loser meets the stale xmin or the unique index of succeeded payments; both are 409 (spec 002).
         var (winner, loser) = Split(responses);
@@ -72,6 +70,35 @@ public sealed class SessionConcurrencyTests(ApiFixture fixture)
     }
 
     [Fact]
+    public async Task Pay_ApprovedAndDeclinedConcurrently_OneReturns409AndNoDeclineOnPaidSession()
+    {
+        // Arrange (independent review of F3a: the decline also checks the session xmin, ADR 0006)
+        var cancellationToken = TestContext.Current.CancellationToken;
+        fixture.Clock.SetUtcNow(Wednesday10);
+        using var client = fixture.Gated.CreateClient();
+        var arranged = await SessionApi.ArrangeAsync(client, fixture.Clock, cancellationToken);
+        var declining = await UserApi.AddPaymentMethodAsync(client, arranged.UserId, cancellationToken, $"decline_{Guid.NewGuid():N}");
+        var closed = await SessionApi.ClosedSessionAsync(client, fixture.Clock, arranged, TimeSpan.FromMinutes(40), cancellationToken);
+
+        // Act
+        var responses = await RaceAsync(
+            () => SessionApi.PayAsync(client, closed.Id, arranged.PaymentMethodId, cancellationToken),
+            () => SessionApi.PayAsync(client, closed.Id, declining.Id, cancellationToken));
+
+        // Assert: whichever saves first wins (200 paid, or 402 declined); the other meets the stale xmin (409).
+        var statuses = responses.Select(response => response.StatusCode).ToList();
+        Assert.Single(statuses, status => status == HttpStatusCode.Conflict);
+        Assert.Single(statuses, status => status is HttpStatusCode.OK or HttpStatusCode.PaymentRequired);
+        var payments = await DbProbe.ColumnAsync(
+            App, "SELECT status FROM payments WHERE session_id = $1", cancellationToken, closed.Id);
+        var session = await DbProbe.ScalarAsync<string>(
+            App, "SELECT status FROM parking_sessions WHERE id = $1", cancellationToken, closed.Id);
+        Assert.Equal(statuses.Contains(HttpStatusCode.OK) ? ["Succeeded"] : ["Failed"], payments);
+        Assert.Equal(statuses.Contains(HttpStatusCode.OK) ? "Paid" : "Closed", session);
+        Dispose(responses);
+    }
+
+    [Fact]
     public async Task Open_TwoConcurrentSameVehicle_OneReturns409()
     {
         // Arrange (spec 002, «Edge Cases»: the partial unique index lets only one through)
@@ -80,12 +107,11 @@ public sealed class SessionConcurrencyTests(ApiFixture fixture)
         using var client = fixture.Gated.CreateClient();
         var arranged = await SessionApi.ArrangeAsync(client, fixture.Clock, cancellationToken);
         var (otherSpot, _) = await ConfigurationApi.CreateSpotAsync(client, arranged.Facility.Id, arranged.ZoneId, cancellationToken);
-        fixture.Gate.Arm(2);
 
         // Act
-        var responses = await Task.WhenAll(
-            SessionApi.OpenAsync(client, arranged.SpotId, arranged.VehicleId, cancellationToken),
-            SessionApi.OpenAsync(client, otherSpot.Id, arranged.VehicleId, cancellationToken));
+        var responses = await RaceAsync(
+            () => SessionApi.OpenAsync(client, arranged.SpotId, arranged.VehicleId, cancellationToken),
+            () => SessionApi.OpenAsync(client, otherSpot.Id, arranged.VehicleId, cancellationToken));
 
         // Assert
         var (winner, loser) = Split(responses);
@@ -94,6 +120,20 @@ public sealed class SessionConcurrencyTests(ApiFixture fixture)
         Assert.Equal(1, await DbProbe.ScalarAsync<long>(
             App, "SELECT count(*) FROM parking_sessions WHERE vehicle_id = $1", cancellationToken, arranged.VehicleId));
         Dispose(responses);
+    }
+
+    /// <summary>Arms the gate for both requests, runs them together and always disarms it, even when a request fails.</summary>
+    private async Task<HttpResponseMessage[]> RaceAsync(Func<Task<HttpResponseMessage>> first, Func<Task<HttpResponseMessage>> second)
+    {
+        fixture.Gate.Arm(2);
+        try
+        {
+            return await Task.WhenAll(first(), second());
+        }
+        finally
+        {
+            fixture.Gate.Disarm();
+        }
     }
 
     private static (HttpResponseMessage Winner, HttpResponseMessage Loser) Split(HttpResponseMessage[] responses)

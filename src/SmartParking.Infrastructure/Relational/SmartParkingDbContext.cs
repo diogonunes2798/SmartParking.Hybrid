@@ -119,12 +119,13 @@ internal sealed class SmartParkingDbContext(
         {
             var raisedEvents = rootEntry.Entity.DequeueRaisedEvents();
 
-            // A change confined to owned rows in their own table (for example, only the opening hours) leaves the
-            // root Unchanged: EF Core would neither check nor bump its xmin, so a stale ETag could overwrite it and
-            // the ETag would not change. Touching the root makes the UPDATE ... WHERE xmin = @original run. Only a
-            // root that one of its events declares as changed is touched (ADR 0006).
-            if (rootEntry.State == EntityState.Unchanged
-                && raisedEvents.Any(raised => raised.Changed.Any(entity => ReferenceEquals(entity, rootEntry.Entity))))
+            // The root that raises an event is the consistency boundary of the transition, so its version is always
+            // checked, even when only other entities changed. A change confined to owned rows (for example, only the
+            // opening hours) or to child entities (a payment, a vehicle) leaves the root Unchanged: EF Core would
+            // neither check nor bump its xmin. Touching it makes the UPDATE ... WHERE xmin = @original run, so a
+            // decline cannot be recorded on a session another request has just paid (ADR 0006). Being touched does
+            // not make the root a changed entity: it gets an audit entry only when an event lists it.
+            if (rootEntry.State == EntityState.Unchanged && raisedEvents.Count > 0)
             {
                 rootEntry.State = EntityState.Modified;
             }
