@@ -152,3 +152,71 @@ Formato de cada entrada:
 - **Decisões:**
   - *Merge commit* em vez de *squash*: os *commits* da F1 referidos neste diário continuam a existir na `main`.
 - ***Commits:*** `0edbb45` (*merge* do PR #1); registo desta entrada no commit seguinte.
+
+## F2a: domínio, esquema e parques (especificação 001)
+
+- **Data:** 2026-11-24 a 2026-11-25
+- **Feito:**
+  - Plano aprovado pelo Diogo ([`docs/plans/001a-dominio-esquema-parques.md`](plans/001a-dominio-esquema-parques.md)), ramo `feat/001-configuracao`, 15 passos.
+  - Domain dos três agregados da Tabela 15 (estrutura e invariantes de construção), `AggregateRoot` com eventos de domínio e os eventos `FacilityCreated.v1`, `FacilityUpdated.v1` e `FacilityDeleted.v1`.
+  - Subcamada relacional:
+    - modelo EF Core com nomes em `snake_case` (convenção escrita à mão), enums como texto com `CHECK` dos valores permitidos, FK compostas que mantêm zonas e lugares no mesmo parque, índices únicos parciais e `geography(Point, 4326)` com índice GiST;
+    - migração `Initial` com PostGIS, `btree_gist`, os dois `EXCLUDE` (versões de tarifário e reservas ativas), o operador de referência por `HasData` e o script versionado do grupo `smartparking_app` ([ADR 0004](adr/0004-papel-da-aplicacao-e-auditoria.md));
+    - o `DbContext` é o `IUnitOfWork`: uma auditoria e uma mensagem da *outbox* por evento, na mesma transação; violações traduzidas para 409, 400 e 412.
+  - Fundação: `Error.PreconditionFailed` (412) e `Error.PreconditionRequired` (428), a porta `ICurrentActor` (`anonymous`), paginação partilhada e o `TimeProvider` registado (não estava registado desde a F1).
+  - Parques: comandos e consultas em Application, repositório por raiz de agregado (D10) e porta de leitura, *endpoints* `/api/facilities` com ETag forte sobre o `xmin` e `If-Match` nas alterações; `tests/http/configuration.http` com os pedidos de parques.
+  - Testes: os hosts de teste ligam com o *login* da aplicação (`smartparking_api`), nunca como superutilizador. AC-1 a AC-6, AC-10, AC-12 e AC-17 a AC-22 cobertos por testes com o número no nome; 131 testes a passar no fim (52 antes da F2a).
+  - Desenvolvimento local: `POSTGRES_APP_PASSWORD` no `.env.example`, `scripts/db-app-user.sh` e a Api a ligar como `smartparking_api`.
+  - Verificação manual (AC-1 documental): `dotnet ef database update`, como dono, aplicou a `Initial` à base do `compose.yaml`; o `db-app-user.sh` criou o *login*. Com a Api ligada como `smartparking_api`: `/health/ready` 200; POST 201 com `Location` e ETag; GET 200; PUT sem `If-Match` 428, com o ETag 200 e ETag novo, com o ETag antigo 412; DELETE 204; na base, três auditorias `anonymous` (`Created`, `Updated`, `Deleted`), cada uma com o seu evento por publicar. A Api parou sem deixar processo órfão na porta 5080.
+- **Versões dos pacotes** (resolvidas a 2026-11-24 com `dotnet package search`): Npgsql.EntityFrameworkCore.PostgreSQL e Npgsql.EntityFrameworkCore.PostgreSQL.NetTopologySuite 10.0.4; Microsoft.EntityFrameworkCore.Design 10.0.15 (EF Core 10.0.15 por dependência).
+- **Problemas:**
+  - O `dotnet add package` sem versão escolheria o EF Core 11.0.0, que segue o .NET 11. As versões foram fixadas na linha 10.x, contra a regra «sem `--version`» mas de acordo com a regra «Microsoft.* na linha 10.x».
+  - A convenção `snake_case` mudava o nome da coluna `xmin` para `version`, o que criaria uma coluna verdadeira `version xid` em cinco tabelas. Detetado ao rever o DDL gerado por `dotnet ef dbcontext script`; a convenção passou a ignorar as propriedades de versão.
+  - O código gerado das migrações dava CA1861 (avisos tratados como erros). Resolvido com um `.editorconfig` em `Relational/Migrations` que marca só os ficheiros gerados como `generated_code`.
+  - O tipo `geography(Point, 4326)` converte em silêncio uma latitude fora do intervalo (95 passa a 90, só com um `NOTICE`). Os `CHECK` de latitude e longitude da especificação nunca falhariam e saíram da `Initial` (ver «Decisões»).
+  - `WithName` no FluentValidation não muda a chave do `ValidationProblemDetails`; passou-se para `OverridePropertyName`.
+  - O registo dos validadores (F1) ignorava tipos `internal`, que é o omisso do `AssemblyScanner`; passou a incluí-los, porque os validadores da Api são internos.
+  - No Git Bash, os caminhos `/tmp/…` passados ao `docker exec` eram convertidos em caminhos do Windows; resolvido com `MSYS_NO_PATHCONV=1`.
+  - Nenhuma abordagem falhou duas vezes; não foi preciso voltar a planear.
+- **Decisões:**
+  - Pacotes EF Core da stack do `CLAUDE.md` autorizados, apesar de a especificação pôr «dependências NuGet novas» fora do âmbito: o «Out» lê-se como «fora da stack» (Diogo, 2026-11-24).
+  - AC-17 e AC-18 cobertos com parques na F2a; os casos de tarifários e de lugares juntam-se aos mesmos testes na F2b (Diogo, 2026-11-24).
+  - Um `operatorId` inexistente dá 409 pela FK, sem porta nova (Diogo, 2026-11-24).
+  - `CHECK` de latitude e longitude retirados, com a garantia no `GeoCoordinate` do Domain e no validador (Diogo, 2026-11-24; ADR 0004).
+  - `IUnitOfWork.SaveChangesAsync` passa a devolver `Result`, para a Infrastructure devolver as violações sem EF Core em Application.
+  - `AuditEntry` e `OutboxMessage` na Infrastructure, por serem persistência e não domínio; auditoria e *outbox* no `SaveChangesAsync` do `DbContext`, sem *interceptor* (ADR 0004).
+  - O `before` e o `after` da auditoria guardam a raiz e as linhas do horário, lidas do ChangeTracker, sem o `xmin`.
+  - O tradutor de FK distingue «ainda referenciado» de «referência inexistente» pelo comando que falhou, e não pelo texto da mensagem, que depende do `lc_messages` do servidor. Nunca copia o DETAIL, que traz valores das linhas.
+  - Invariantes do Domain com `ArgumentException`, sem `DomainException`: são erros de programação, porque a entrada é validada na fronteira.
+  - `Version` (o `xmin`) também no `Tariff`, porque o DELETE de tarifários da F2b pede `If-Match`; o `xmin` é uma coluna de sistema, por isso o esquema não muda.
+  - Validadores dos parques na Api, sobre os DTO do pedido (o `ValidationFilter` da F1 valida o argumento do *endpoint* e o `CLAUDE.md` pede DTO próprios na fronteira), e não em Application como dizia o plano.
+  - Uma classe estática por operação (`CreateFacility`, `UpdateFacility`…), com `Command` ou `Query` e `Handler` aninhados.
+  - Sem `SetExpectedVersion` no repositório (estava no plano): o *handler* compara o `If-Match` com o `xmin` carregado, e uma corrida entre a leitura e a gravação é apanhada pelo `UPDATE … WHERE xmin` do EF Core.
+  - Um PUT que não muda nada não grava auditoria nem evento e mantém o ETag.
+  - Sem `ConnectionStrings:PostgresMigrations` no `appsettings.json` (estava no plano): o `dotnet ef` lê a ligação do dono da variável de ambiente `ConnectionStrings__PostgresMigrations`, e uma entrada no ficheiro nunca seria lida.
+  - Os Workers continuam a ligar como dono; revê-se na F3/F4, com o leitor da *outbox*.
+- ***Commits:*** `1b01d96` (plano), `4dd0d2a` (pacotes), `018653e` (fundação), `05319fb` (Domain), `9dd0343` (modelo EF), `51d4182` (migração `Initial`), `e7475de` (unidade de trabalho), `5218fc2` (testes de esquema), `455676b` (operações de parques), `a3064fa` (*endpoints*), `a7627a6` (testes de arquitetura e de modos), `dc0b4d8` (desenvolvimento local), `9aeeb27` (ADR 0004).
+
+## F2a: verificação e revisão independente
+
+- **Data:** 2026-11-25
+- **Feito:**
+  - `/verify` do *kit* (7 fases): build PASS (0 erros, 0 avisos); diagnósticos PASS (0); antipadrões WARN; testes PASS (130); segurança PASS (nenhum pacote vulnerável, nenhuma palavra-passe no `src`); format PASS; diff PASS. Os avisos de antipadrões são todos de código gerado em `obj/`, de métodos de teste xUnit sem parâmetro `CancellationToken`, ou dois falsos positivos em `src/`: o repositório de escrita mantém o *tracking* de propósito, e o `ChangeTracker.Entries()` não é uma consulta.
+  - `get_project_graph`: dependências só para dentro. `get_di_registrations`: sem duplicados nem dependências cativas.
+  - Teste de mutação do AC-22: sem o registo do `IFacilityReader`, o teste falha nos dois modos e nomeia a porta.
+  - Revisão independente do diff por um subagente (`code-reviewer`), sem acesso de escrita: um achado importante e seis menores, todos tratados com o acordo do Diogo. Depois das correções: 131 testes a passar, build e format limpos.
+- **Problemas (achados da revisão):**
+  - **Importante:** um PUT que só mudava o horário (uma tabela *owned* própria) deixava a linha do parque intacta, e o EF Core não emitia o `UPDATE … WHERE xmin`. O ETag não mudava, e um ETag antigo podia sobrescrever o horário sem 412 (atualização perdida, contra o AC-12). Confirmado primeiro com um teste que falhou.
+  - Depois de uma gravação falhada, as linhas de auditoria e de *outbox* acrescentadas ficavam no ChangeTracker e podiam ser gravadas mais tarde no mesmo âmbito.
+  - Havia dois códigos diferentes para o mesmo 412.
+  - Um `If-Match` malformado num id inexistente dá 412 e não 404.
+  - No `db-app-user.sh`, a palavra-passe ia na linha de comandos (visível no `ps`) e o `ALTER ROLE` podia ir para o registo do servidor, se o `log_statement` estivesse ligado.
+  - O AC-5 só via as mensagens da *outbox* através da auditoria, e o teste do nome repetido não verificava a auditoria nem a *outbox*.
+- **Decisões:**
+  - Um agregado com eventos pendentes passa a `Modified`, mesmo que só tenham mudado as linhas *owned*; teste novo `Put_OnlyOpeningHoursChanged_Returns200WithNewETagAndOldETagIsStale_AC12`.
+  - `ChangeTracker.Clear()` depois de uma gravação falhada, documentado no `IUnitOfWork`.
+  - Um só código para o 412: `Concurrency.StaleVersion`.
+  - O 412 do `If-Match` malformado fica como está (o RFC 9110 permite-o) e documentado no `FacilityEndpoints`.
+  - A palavra-passe do `db-app-user.sh` passa pelo stdin do `psql` (`\set`, com plicas e barras escapadas; verificado com uma palavra-passe com plicas, barras e `;`) e o `log_statement` fica desligado nessa sessão.
+  - O AC-5 conta também as mensagens da *outbox* desse parque, e o teste do nome repetido confirma que não há auditoria nem *outbox* nova.
+- ***Commits:*** `d7ac285` (correções da revisão); registo desta entrada no commit seguinte.

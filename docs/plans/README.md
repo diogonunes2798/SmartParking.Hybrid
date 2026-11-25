@@ -7,4 +7,4 @@
 | Plano | Especificação | Estado | Data |
 |---|---|---|---|
 | [000-fundacao](000-fundacao.md) | [000-visao-geral](../specs/000-visao-geral.md) | Implementado | 2026-11-24 |
-| [001a-dominio-esquema-parques](001a-dominio-esquema-parques.md) | [001-configuracao](../specs/001-configuracao.md) (F2a) | Em implementação | 2026-11-24 |
+| [001a-dominio-esquema-parques](001a-dominio-esquema-parques.md) | [001-configuracao](../specs/001-configuracao.md) (F2a) | Implementado (ramo `feat/001-configuracao`) | 2026-11-25 |

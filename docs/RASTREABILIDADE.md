@@ -49,17 +49,17 @@ Estado: «por preencher» até existir uma especificação aprovada que cubra o 
 | RF-03 | UC-03 | por preencher | 004-disponibilidade (F5) | por preencher | por preencher | por preencher |
 | RF-04 | UC-03 | por preencher | 004-disponibilidade (F5) | por preencher | por preencher | por preencher |
 | RF-05 | UC-04 | por preencher | 006-analitica (F7) | por preencher | por preencher | por preencher |
-| RF-06 | UC-02, UC-05 | AC-1 a AC-6, AC-12, AC-17, AC-18, AC-21, AC-22 (F2a); AC-7 a AC-9, AC-11, AC-13 a AC-16, AC-23 (F2b) | 001-configuracao (F2a, F2b); plano [001a](plans/001a-dominio-esquema-parques.md) | por preencher | por preencher | em implementação (F2a) |
+| RF-06 | UC-02, UC-05 | AC-1 a AC-6, AC-12, AC-17, AC-18, AC-21, AC-22 (F2a); AC-7 a AC-9, AC-11, AC-13 a AC-16, AC-23 (F2b) | 001-configuracao (F2a, F2b); plano [001a](plans/001a-dominio-esquema-parques.md) | `Domain/Facilities`, `Application/Features/Facilities`, `Infrastructure/Relational` (modelo, migração `Initial`, unidade de trabalho), `Api/Features/Facilities` | `Api.Tests/Features/Facilities`, `Api.Tests/Features/Schema/InitialMigrationTests`, `Api.Tests/Features/Configuration/PersistenceModeTests` (AC-22); `ArchitectureTests/Features/RepositoryRulesTests`, `DomainEventRulesTests` (AC-21) | F2a a passar (2026-11-25); F2b por fazer |
 | RNF-01 | UC-01, UC-02, UC-03 | por preencher | 005-sincronizacao (F6, UC-01); 011-medicoes (F12, os três UC) | por preencher | por preencher | por preencher |
 | RNF-02 | — | por preencher | 011-medicoes (F12) | por preencher | por preencher | por preencher |
 | RNF-03 | — | por preencher | 011-medicoes (F12) | por preencher | por preencher | por preencher |
 | RNF-04 | UC-05 | por preencher | 007-simulador-esquema (F8) | por preencher | por preencher | por preencher |
 | RNF-05 | — | por preencher | 009-ciclo-de-vida (F10) | por preencher | por preencher | por preencher |
-| RNF-06 | — | por preencher | 010-seguranca (F11) | por preencher | por preencher | por preencher |
+| RNF-06 | — | AC-10 de 001-configuracao (auditoria só por acréscimo); restantes por preencher | 001-configuracao (F2a, auditoria; [ADR 0004](adr/0004-papel-da-aplicacao-e-auditoria.md)); 010-seguranca (F11, cifra e RBAC) | `Infrastructure/Relational/Migrations/Sql/0001_app_role.sql`, `Infrastructure/Relational/SmartParkingDbContext.cs`, `scripts/db-app-user.sh` | `Api.Tests/Features/Schema/AppRolePermissionsTests` | parcial: auditoria a passar (F2a, 2026-11-25); cifra e RBAC na F11 |
 
 ### Critérios transversais (sem RF/RNF próprio)
 
-A especificação 000 (F1, aprovada a 2026-11-24) não responde a nenhum RF ou RNF da tese: prepara a fundação comum (OE6, secção 5.9.1). Os seus critérios ficam aqui, fora da matriz, para não inflacionar a Tabela 17.
+A especificação 000 (F1, aprovada a 2026-11-24) não responde a nenhum RF ou RNF da tese: prepara a fundação comum (OE6, secção 5.9.1). Os seus critérios ficam aqui, fora da matriz, para não inflacionar a Tabela 17. O mesmo vale para os critérios da especificação 001 que não respondem ao RF-06 nem ao RNF-06: o AC-19 prepara o RF-02, mas o RF-02 só liga à F3.
 
 | Especificação | AC-n | Tema | Código | Teste | Estado |
 |---|---|---|---|---|---|
@@ -68,3 +68,4 @@ A especificação 000 (F1, aprovada a 2026-11-24) não responde a nenhum RF ou R
 | 000-visao-geral (F1) | AC-10 a AC-13 | ProblemDetails, Result, validação, OpenAPI | `Infrastructure/Hosting/GlobalExceptionHandler.cs`, `Api/Common/`, `Api/Program.cs` | `Api.Tests/Features/Errors`, `Validation`, `OpenApi` | a passar |
 | 000-visao-geral (F1) | AC-14 | Imagens dos Testcontainers iguais às do `compose.yaml` | `tests/Common/ContainerImages.cs` | `ArchitectureTests/Features/ContainerImagesTests` | a passar |
 | 000-visao-geral (F1) | AC-15, AC-16 | Documentais: ADR 0003 e compilação limpa | `docs/adr/0003-repository-por-raiz-de-agregado.md` | `dotnet build -warnaserror` e `dotnet format --verify-no-changes` corridos à mão (2026-11-24); `/verify` por correr | verificado à mão |
+| 001-configuracao (F2a) | AC-19, AC-20 | Restrições do agregado de sessão; erros 412/428 | `Infrastructure/Relational/Configurations/Sessions/`, migração `Initial` (`EXCLUDE`), `Api/Common/ResultExtensions.cs` | `Api.Tests/Features/Schema/SessionConstraintsTests`, `Api.Tests/Features/Errors/ErrorHandlingTests` | a passar (2026-11-25) |
