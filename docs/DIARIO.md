@@ -361,7 +361,9 @@ Formato de cada entrada:
     - sem a reserva nas entidades alteradas do `SessionOpened`, o AC-25 falha (uma só auditoria da reserva);
     - com a janela aberta no fim (`<` em vez de `≤`), o caso «no extremo exato da tolerância» falha;
     - parar a passagem no primeiro conflito (`break` em vez de `continue`) faz falhar o caso de conflito do AC-28;
-    - sem a conversão 412 → 409 no `CancelReservation`, o teste novo do cancelamento que perde falha (ver «Problemas»).
+    - sem a conversão 412 → 409 no `CancelReservation`, o teste novo do cancelamento que perde falha (ver «Problemas»);
+    - sem o `catch` da `DbUpdateException` no *worker* (achado 1 da revisão), o *worker* para depois da primeira gravação falhada e o teste `Worker_SaveFails_HostKeepsRunningAndExpiresOnALaterPass` falha.
+  - Documentação: ADR 0007 e índice; RASTREABILIDADE (RF-02 com o AC-1 a AC-30, RNF-06 com o AC-28 e o AC-29, e a linha do RF-02 na Tabela 13 reposta); estado do plano 002b e dos índices; `CLAUDE.md` (os Workers com a expiração de reservas e os comandos com os dois logins da aplicação); `.env.example` com `POSTGRES_WORKERS_PASSWORD`.
 - **Problemas:**
   - O teste do *host* com a base inacessível falhou à primeira: o EF Core embrulha a falha de ligação numa `InvalidOperationException` («transient failure») cuja causa é a `NpgsqlException`, e o *worker* só apanhava `DbException`, por isso parava. Passou a apanhar também esse caso, com um filtro sobre a exceção interna (sem `catch (Exception)`).
   - Duas mutações do plano sobreviveram à primeira:
@@ -370,6 +372,8 @@ Formato de cada entrada:
   - Um *heredoc* voltou a ficar pendurado no Git Bash (lição já registada); foi parado e os ficheiros foram escritos diretamente.
   - Desde o fecho da F3a (`7539a19`), a linha do RF-02 na Tabela 13 da RASTREABILIDADE tinha as colunas da matriz (AC, especificação, código, testes) em vez do texto do requisito. Foi reposta com a redação da tese dada pelo Diogo («Ciclo de vida das sessões», UC-02, prioridade Alta); a rastreabilidade fica na linha da matriz.
   - Desta vez o `TaskStop` não deixou processos órfãos da Api nem dos Workers (confirmado pelo nome).
+  - Para a verificação manual, o `.env` local (não versionado) ganhou `POSTGRES_WORKERS_PASSWORD`; sem ela, o `scripts/db-app-user.sh` recusa correr. Quem já tinha o ambiente da F3a tem de fazer o mesmo e voltar a correr o script.
+  - A sessão foi interrompida pelo limite de utilização no passo 14: a revisão independente, já lançada, foi parada antes de acabar e voltou a ser lançada do início na sessão seguinte, sobre o mesmo `HEAD`; os testes de mutação e a documentação foram feitos depois da retoma.
 - **Decisões:**
   - Pontos 1 a 3 e propostas 4 a 15 do plano 002b, aprovados com ele; ADR 0007.
   - Desvios ao plano, com a razão:
@@ -385,4 +389,4 @@ Formato de cada entrada:
   4. O mesmo veículo a abrir sem `reservationId` dentro da sua janela (ponto 2 do plano) deixa a reserva `Active`, que depois expira: conta como não comparência nos relatórios do UC-04.
   5. Testes: o caso negativo do AC-25 só verificava o 409, não o código do erro (**corrigido:** cada caso verifica `Session.OutsideFulfilmentWindow` ou `Session.ReservationMismatch`); os *hosts* criados por `CreateFactory` nos testes dos Workers correm o *worker* real com o relógio do sistema (inofensivo enquanto os testes correm em série e verificam por id).
   6. *Nits*: o validador compara os instantes antes da normalização ao microssegundo; o `ListDueIdsAsync` não tem limite de lote; a mensagem de `Reservation.NotActive`.
-- ***Commits:*** `4f1b61b`, `3bf1248`, `fd1bf5f`, `9b84572`, `27040a3`, `6d2d73c`, `25b5489`, `41cf95d`, `b9fcac2`, `ed7debd`, `e09a33f`, `97eaf2d`, `eeb5847`, `a850710`. PR [#3](https://github.com/diogonunes2798/SmartParking.Hybrid/pull/3) (F3a e F3b para a `main`), aberto com o OK do Diogo a 2026-11-25; por integrar.
+- ***Commits:*** `4f1b61b`, `3bf1248`, `fd1bf5f`, `9b84572`, `27040a3`, `6d2d73c`, `25b5489`, `41cf95d`, `b9fcac2`, `ed7debd`, `e09a33f`, `97eaf2d`, `eeb5847`, `a850710`, `d8d35cd`, `ea71e7c`, `7c306f8`, `0bce65c`, `209c7b7` e o desta atualização do diário. PR [#3](https://github.com/diogonunes2798/SmartParking.Hybrid/pull/3) (F3a e F3b para a `main`), aberto com o OK do Diogo a 2026-11-25; por integrar.
