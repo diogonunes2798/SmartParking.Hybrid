@@ -78,13 +78,19 @@ internal static class SessionApi
     public static Task<HttpResponseMessage> PayAsync(HttpClient client, Guid sessionId, Guid paymentMethodId, CancellationToken cancellationToken) =>
         client.PostAsJsonAsync(Pay(sessionId), new PaySessionRequest(paymentMethodId), cancellationToken);
 
-    /// <summary>Opens a session now and closes it after <paramref name="duration"/> on the clock.</summary>
+    /// <summary>
+    /// Opens a session now and closes it after <paramref name="duration"/> on the clock. The clock then moves one more
+    /// minute, so the next transition is not written at the same instant: audit and outbox rows are listed by
+    /// <c>occurred_at</c>, and UUID v7 ids of the same millisecond have no reliable order.
+    /// </summary>
     public static async Task<SessionResponse> ClosedSessionAsync(
         HttpClient client, FakeTimeProvider clock, Arranged arranged, TimeSpan duration, CancellationToken cancellationToken)
     {
         var opened = await OpenOkAsync(client, arranged.SpotId, arranged.VehicleId, cancellationToken);
         clock.Advance(duration);
-        return await CloseOkAsync(client, opened.Id, cancellationToken);
+        var closed = await CloseOkAsync(client, opened.Id, cancellationToken);
+        clock.Advance(TimeSpan.FromMinutes(1));
+        return closed;
     }
 
     public static int ChargeCount(IServiceProvider services, Guid sessionId, Guid paymentMethodId) =>
