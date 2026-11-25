@@ -24,6 +24,7 @@ public sealed class TransitionOutboxTests(ApiFixture fixture)
     [InlineData("decline", "PaymentFailed.v1")]
     [InlineData("create reservation", "ReservationCreated.v1")]
     [InlineData("cancel reservation", "ReservationCancelled.v1")]
+    [InlineData("open with reservation", "SessionOpened.v1")]
     public async Task Transition_WritesExactlyOneOutboxMessage_AC21(string transition, string expectedType)
     {
         // Arrange
@@ -84,6 +85,15 @@ public sealed class TransitionOutboxTests(ApiFixture fixture)
         var created = await ReservationApi.CreateOkAsync(client, ReservationApi.Request(arranged), cancellationToken);
         if (transition == "create reservation")
         {
+            return created.Id;
+        }
+
+        if (transition == "open with reservation")
+        {
+            // Counted by the xmin of the reservation row: the fulfilment shares the transaction of the session.
+            fixture.Clock.SetUtcNow(ReservationApi.ReferenceStart);
+            using var opened = await SessionApi.OpenAsync(client, arranged.SpotId, arranged.VehicleId, cancellationToken, created.Id);
+            opened.EnsureSuccessStatusCode();
             return created.Id;
         }
 

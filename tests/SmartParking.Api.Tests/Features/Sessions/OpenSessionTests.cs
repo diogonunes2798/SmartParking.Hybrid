@@ -88,25 +88,6 @@ public sealed class OpenSessionTests(ApiFixture fixture)
         await AssertNothingWrittenAsync(arranged, cancellationToken);
     }
 
-    [Fact]
-    public async Task Open_WithReservationId_Returns409UntilF3b()
-    {
-        // Arrange (decision 2 of plan 002a)
-        var cancellationToken = TestContext.Current.CancellationToken;
-        fixture.Clock.SetUtcNow(Wednesday10);
-        using var client = fixture.Sessions.CreateClient();
-        var arranged = await SessionApi.ArrangeAsync(client, fixture.Clock, cancellationToken);
-
-        // Act
-        using var response = await SessionApi.OpenAsync(
-            client, arranged.SpotId, arranged.VehicleId, cancellationToken, reservationId: Guid.CreateVersion7());
-
-        // Assert
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        Assert.Contains("Session.ReservationNotSupported", await response.Content.ReadAsStringAsync(cancellationToken), StringComparison.Ordinal);
-        await AssertNothingWrittenAsync(arranged, cancellationToken);
-    }
-
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

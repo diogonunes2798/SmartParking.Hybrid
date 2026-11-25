@@ -16,10 +16,20 @@ internal static class SessionErrors
     public static Error PaymentMethodNotFound(Guid id) =>
         Error.NotFound("PaymentMethod.NotFound", $"Payment method {id} does not exist.");
 
-    /// <summary>Temporary until F3b, which fulfils reservations (decision 2 of plan 002a).</summary>
-    public static Error ReservationNotSupported { get; } = Error.Conflict(
-        "Session.ReservationNotSupported",
-        "Opening a session with a reservation is not available yet (F3b).");
+    public static Error ReservationNotFound(Guid id) =>
+        Error.NotFound("Reservation.NotFound", $"Reservation {id} does not exist.");
+
+    public static Error ReservationMismatch { get; } = Error.Conflict(
+        "Session.ReservationMismatch", "The reservation is for another spot or another vehicle.");
+
+    public static Error ReservationNotActive { get; } = Error.Conflict(
+        "Session.ReservationNotActive", "The reservation is no longer active.");
+
+    public static Error OutsideFulfilmentWindow { get; } = Error.Conflict(
+        "Session.OutsideFulfilmentWindow", "The reservation cannot be fulfilled at this time: too early or past its grace period.");
+
+    public static Error SpotReserved { get; } = Error.Conflict(
+        "Session.SpotReserved", "The parking spot is reserved for another vehicle at this time.");
 
     public static Error SpotInactive { get; } = Error.Conflict(
         "Session.SpotInactive", "The parking spot is inactive.");
