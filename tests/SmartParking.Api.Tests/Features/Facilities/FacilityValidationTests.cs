@@ -8,7 +8,8 @@ namespace SmartParking.Api.Tests.Features.Facilities;
 
 /// <summary>
 /// Invalid facility requests are answered with 400 ValidationProblemDetails before the handler runs (spec 001, AC-17).
-/// F2a covers the facility cases; F2b adds the tariff cases (negative price, zero billing increment).
+/// These are the facility cases; the tariff cases (negative price, zero billing increment) are in
+/// <c>Tariffs/TariffTests.Create_InvalidInput_Returns400ValidationProblemAndWritesNothing_AC17</c>.
 /// </summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class FacilityValidationTests(ApiFixture fixture)

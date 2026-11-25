@@ -43,6 +43,21 @@ public sealed class TariffVersionTests
     }
 
     [Fact]
+    public void CreateVersion_SubMicrosecondStart_ClosesLatestAtTheStoredInstant()
+    {
+        // Arrange
+        var latest = NewVersion(latest: null, Now);
+        var validFrom = Now.AddDays(1).AddTicks(7);
+
+        // Act
+        var next = NewVersion(latest, validFrom);
+
+        // Assert
+        Assert.Equal(0, next.ValidFrom.Ticks % 10);
+        Assert.Equal(next.ValidFrom, latest.ValidTo);
+    }
+
+    [Fact]
     public void CreateVersion_InThePast_Throws()
     {
         // Act + Assert
