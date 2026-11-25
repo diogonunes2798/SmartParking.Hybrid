@@ -282,3 +282,31 @@ Formato de cada entrada:
   - *Merge commit* em vez de *squash*: os *commits* da F2a e da F2b referidos neste diário continuam a existir na `main`.
   - O ramo `feat/001-configuracao` foi apagado no `origin` e localmente, a pedido do Diogo, depois de se confirmar que estava integrado na `main` (`git merge-base --is-ancestor`), como na F1. A cópia de trabalho principal passou para a `main`.
 - ***Commits:*** `f123c86` (*merge* do PR #2); registo desta entrada no commit seguinte.
+
+## F3: especificação 002 (sessões, reservas e pagamentos)
+
+- **Data:** 2026-11-25
+- **Feito:**
+  - Especificação [002-sessoes-pagamentos](specs/002-sessoes-pagamentos.md) escrita com o `/spec` do *kit*, em 10 rondas de perguntas, e aprovada pelo Diogo a 2026-11-25. Tem 30 AC: AC-1 a AC-21 na F3a (utilizadores, sessões, cálculo do valor, pagamento, falha a meio e concorrência) e AC-22 a AC-30 na F3b (reservas e *worker* de expiração).
+  - Índice das especificações e matriz de rastreabilidade (RF-02) atualizados.
+- **Problemas:**
+  - O pedido da F3 dava a especificação 002 como aprovada, mas o ficheiro não existia: o índice marcava a F3 como «Por especificar». A implementação parou antes do plano, e a especificação foi feita primeiro.
+  - Duas contradições resolvidas durante as perguntas:
+    - a chave de idempotência do gateway só com o `sessionId` impediria tentar de novo com outro meio depois de uma recusa; passou a ser (`sessionId`, `paymentMethodId`);
+    - duas auditorias para um só evento (ronda 8) contrariam o mecanismo da F2, em que cada evento gera uma auditoria, e o ADR 0005; o Diogo manteve as duas auditorias, e a versão de tarifário fechada da F2 fica como exceção registada.
+- **Decisões:**
+  - Regra de cálculo do valor:
+    - minutos grátis como limiar;
+    - incremento arredondado sempre para cima;
+    - máximo diário por períodos de 24 h a contar da entrada;
+    - 2 casas decimais com arredondamento do meio para cima, aplicado uma só vez no fim.
+  - A sessão usa a versão de tarifário em vigor na abertura (ADR 0005).
+  - Pagamento:
+    - o gateway é chamado fora da transação, e depois uma só transação grava tudo;
+    - uma recusa grava um `Payment` `Failed` e responde 402 (`Error.PaymentDeclined`, extensão da fundação).
+  - Comandos de transição sem `If-Match`: um conflito de `xmin` dá 409.
+  - Exatamente um evento por transição; uma auditoria por entidade alterada.
+  - Uma única alteração ao esquema, aditiva: o índice único parcial das sessões `Open` por veículo.
+  - Os Workers passam a ligar como papel da aplicação, o que fecha o ponto em aberto da F2.
+  - Implementação dividida em F3a e F3b.
+- ***Commits:*** por fazer.
