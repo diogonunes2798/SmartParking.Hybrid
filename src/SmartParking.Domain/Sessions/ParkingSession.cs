@@ -35,27 +35,44 @@ public sealed class ParkingSession : AggregateRoot
 
     public uint Version { get; private set; }
 
+    /// <summary>
+    /// Opens a session at <paramref name="now"/>. With a <paramref name="reservation"/>, the session fulfils it in the
+    /// same transition: one <see cref="SessionOpened"/> that changed the session and the reservation (spec 002,
+    /// ADR 0006, ADR 0007).
+    /// </summary>
     public static ParkingSession Open(
         Guid id,
         Guid spotId,
         Guid vehicleId,
         Guid tariffId,
-        Guid? reservationId,
-        DateTimeOffset now)
+        Reservation? reservation,
+        DateTimeOffset now,
+        ReservationPolicy policy)
     {
+        ArgumentNullException.ThrowIfNull(policy);
+
         var session = new ParkingSession
         {
             Id = Guard.Id(id),
             SpotId = Guard.Id(spotId),
             VehicleId = Guard.Id(vehicleId),
             TariffId = Guard.Id(tariffId),
-            ReservationId = reservationId is { } reservation ? Guard.Id(reservation) : null,
+            ReservationId = reservation?.Id,
             StartedAt = Timestamps.Normalize(now),
             Status = SessionStatus.Open,
         };
 
-        session.Raise(new SessionOpened(
-            session.Id, session.SpotId, session.VehicleId, session.TariffId, session.ReservationId, session.StartedAt));
+        var opened = new SessionOpened(
+            session.Id, session.SpotId, session.VehicleId, session.TariffId, session.ReservationId, session.StartedAt);
+
+        if (reservation is null)
+        {
+            session.Raise(opened);
+            return session;
+        }
+
+        reservation.Fulfil(session.SpotId, session.VehicleId, session.StartedAt, policy);
+        session.Raise(opened, session, reservation);
         return session;
     }
 

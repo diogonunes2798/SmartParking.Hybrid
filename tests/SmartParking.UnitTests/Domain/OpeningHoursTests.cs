@@ -34,4 +34,24 @@ public sealed class OpeningHoursTests
         // Assert
         Assert.Equal(expected, open);
     }
+
+    [Theory]
+    [InlineData("2026-12-02T11:00:00Z", "2026-12-02T12:00:00Z", true)]
+    [InlineData("2026-12-02T08:00:00Z", "2026-12-02T20:00:00Z", true)] // ends exactly at closing time
+    [InlineData("2026-12-02T07:30:00Z", "2026-12-02T09:00:00Z", false)] // starts before opening
+    [InlineData("2026-12-02T19:00:00Z", "2026-12-02T20:30:00Z", false)] // ends after closing
+    [InlineData("2026-12-02T19:00:00Z", "2026-12-03T09:00:00Z", false)] // crosses midnight
+    [InlineData("2026-12-03T10:00:00Z", "2026-12-03T11:00:00Z", false)] // Thursday has no row
+    [InlineData("2026-07-01T18:00:00Z", "2026-07-01T19:00:00Z", true)] // 19:00–20:00 in Lisbon summer time
+    [InlineData("2026-07-01T18:30:00Z", "2026-07-01T19:30:00Z", false)] // ends at 20:30 in summer time
+    public void FitsInOneOpeningInterval_Interval_FollowsLocalOpeningHours(string startsAt, string endsAt, bool expected)
+    {
+        // Act
+        var fits = Facility.FitsInOneOpeningInterval(
+            DateTimeOffset.Parse(startsAt, System.Globalization.CultureInfo.InvariantCulture),
+            DateTimeOffset.Parse(endsAt, System.Globalization.CultureInfo.InvariantCulture));
+
+        // Assert
+        Assert.Equal(expected, fits);
+    }
 }

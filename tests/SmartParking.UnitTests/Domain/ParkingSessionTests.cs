@@ -10,6 +10,9 @@ public sealed class ParkingSessionTests
 {
     private static readonly DateTimeOffset Start = new(2026, 12, 2, 10, 0, 0, TimeSpan.Zero);
 
+    private static readonly ReservationPolicy Policy = new(
+        TimeSpan.FromHours(24), TimeSpan.FromDays(7), TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(15));
+
     private static readonly Tariff Reference = Tariff.CreateVersion(
         Guid.CreateVersion7(), Guid.CreateVersion7(), null, Start, 1.20m, 15, 10.00m, 15, "EUR", Start);
 
@@ -129,8 +132,43 @@ public sealed class ParkingSessionTests
             property => Assert.False(property.SetMethod?.IsPublic ?? false));
     }
 
+    [Fact]
+    public void Open_WithReservationInWindow_FulfilsItAndRaisesOneEventThatChangedBoth()
+    {
+        // Arrange
+        var reservation = Reservation.Reserve(
+            Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7(), Start, Start.AddHours(1));
+        reservation.DequeueRaisedEvents();
+
+        // Act
+        var session = ParkingSession.Open(
+            Guid.CreateVersion7(), reservation.SpotId, reservation.VehicleId, Reference.Id, reservation, Start.AddMinutes(5), Policy);
+
+        // Assert
+        Assert.Equal(ReservationStatus.Fulfilled, reservation.Status);
+        Assert.Equal(reservation.Id, session.ReservationId);
+        Assert.Empty(reservation.DomainEvents);
+        var raised = Assert.Single(session.DequeueRaisedEvents());
+        var opened = Assert.IsType<SessionOpened>(raised.Event);
+        Assert.Equal(reservation.Id, opened.ReservationId);
+        Assert.Equal([session, reservation], raised.Changed);
+    }
+
+    [Fact]
+    public void Open_WithReservationOfAnotherVehicle_ThrowsAndLeavesItActive()
+    {
+        // Arrange
+        var reservation = Reservation.Reserve(
+            Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7(), Start, Start.AddHours(1));
+
+        // Act + Assert
+        Assert.Throws<InvalidOperationException>(() => ParkingSession.Open(
+            Guid.CreateVersion7(), reservation.SpotId, Guid.CreateVersion7(), Reference.Id, reservation, Start, Policy));
+        Assert.Equal(ReservationStatus.Active, reservation.Status);
+    }
+
     private static ParkingSession NewSession() =>
-        ParkingSession.Open(Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7(), Reference.Id, null, Start);
+        ParkingSession.Open(Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7(), Reference.Id, null, Start, Policy);
 
     private static ParkingSession ClosedSession()
     {

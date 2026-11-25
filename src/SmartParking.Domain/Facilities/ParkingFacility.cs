@@ -15,6 +15,8 @@ public sealed class ParkingFacility : AggregateRoot
 
     public const int TimeZoneMaxLength = 64;
 
+    private const long TicksPerMicrosecond = 10;
+
     private readonly List<FacilityOpeningHours> openingHours = [];
 
     private ParkingFacility()
@@ -94,19 +96,44 @@ public sealed class ParkingFacility : AggregateRoot
     /// [opensAt, closesAt), so the facility is already closed at closesAt (decision 4 of plan 002a). A day without a
     /// row is closed (spec 002).
     /// </summary>
-    public bool IsOpenAt(DateTimeOffset instant)
+    public bool IsOpenAt(DateTimeOffset instant) =>
+        IsOpenAtLocal(TimeZoneInfo.ConvertTime(instant, TimeZoneInfo.FindSystemTimeZoneById(TimeZone)));
+
+    /// <summary>
+    /// Whether [<paramref name="startsAt"/>, <paramref name="endsAt"/>) fits in a single opening interval of one local
+    /// day (spec 002, reservation rules). The interval is half-open and instants are normalised to the microsecond,
+    /// so its last instant is <c>endsAt − 1 µs</c> and a reservation may end exactly at closing time. Each day has at
+    /// most one [opensAt, closesAt) with opensAt &lt; closesAt, so both ends open on the same local date means the
+    /// whole interval fits.
+    /// </summary>
+    public bool FitsInOneOpeningInterval(DateTimeOffset startsAt, DateTimeOffset endsAt)
     {
-        var local = TimeZoneInfo.ConvertTime(instant, TimeZoneInfo.FindSystemTimeZoneById(TimeZone));
+        if (endsAt <= startsAt)
+        {
+            return false;
+        }
+
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(TimeZone);
+        var first = TimeZoneInfo.ConvertTime(startsAt, zone);
+        var last = TimeZoneInfo.ConvertTime(endsAt.AddTicks(-TicksPerMicrosecond), zone);
+
+        return DateOnly.FromDateTime(first.DateTime) == DateOnly.FromDateTime(last.DateTime)
+            && IsOpenAtLocal(first)
+            && IsOpenAtLocal(last);
+    }
+
+    /// <summary>Records the deletion. The database refuses it (FK RESTRICT) while zones, spots, sensors or tariffs exist.</summary>
+    public void MarkForDeletion() =>
+        Raise(new FacilityDeleted(Id, OperatorId, Name, Location.Latitude, Location.Longitude, TimeZone, Status));
+
+    private bool IsOpenAtLocal(DateTimeOffset local)
+    {
         var time = TimeOnly.FromTimeSpan(local.TimeOfDay);
 
         return openingHours.Find(hours => hours.DayOfWeek == local.DayOfWeek) is { } day
             && time >= day.OpensAt
             && time < day.ClosesAt;
     }
-
-    /// <summary>Records the deletion. The database refuses it (FK RESTRICT) while zones, spots, sensors or tariffs exist.</summary>
-    public void MarkForDeletion() =>
-        Raise(new FacilityDeleted(Id, OperatorId, Name, Location.Latitude, Location.Longitude, TimeZone, Status));
 
     private void SetDetails(string name, string address, GeoCoordinate location, string timeZone)
     {

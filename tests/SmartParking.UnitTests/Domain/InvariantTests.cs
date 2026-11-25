@@ -92,7 +92,7 @@ public sealed class InvariantTests
         var startsAt = DateTimeOffset.UnixEpoch.AddHours(2);
 
         // Act + Assert
-        Assert.Throws<ArgumentException>(() => Reservation.Create(
+        Assert.Throws<ArgumentException>(() => Reservation.Reserve(
             Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7(), startsAt, startsAt));
     }
 }

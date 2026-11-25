@@ -26,6 +26,7 @@ public static class OpenSession
         ITariffRepository tariffs,
         IParkingSessionRepository sessions,
         IUnitOfWork unitOfWork,
+        ReservationPolicy policy,
         TimeProvider clock) : ICommandHandler<Command, SessionView>
     {
         public async Task<Result<SessionView>> HandleAsync(Command command, CancellationToken cancellationToken)
@@ -79,7 +80,7 @@ public static class OpenSession
                 return SessionErrors.VehicleHasOpenSession;
             }
 
-            var session = ParkingSession.Open(Guid.CreateVersion7(now), spot.Id, command.VehicleId, tariff.Id, null, now);
+            var session = ParkingSession.Open(Guid.CreateVersion7(now), spot.Id, command.VehicleId, tariff.Id, null, now, policy);
             sessions.Add(session);
 
             var saved = await unitOfWork.SaveChangesAsync(cancellationToken);
