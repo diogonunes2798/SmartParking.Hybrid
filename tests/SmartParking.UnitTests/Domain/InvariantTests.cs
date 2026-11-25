@@ -77,9 +77,9 @@ public sealed class InvariantTests
     public void Tariff_InvalidValues_Throw(double pricePerHour, int billingIncrementMinutes, string currency)
     {
         // Act + Assert
-        Assert.ThrowsAny<ArgumentException>(() => Tariff.Create(
-            Guid.CreateVersion7(), Guid.CreateVersion7(), DateTimeOffset.UnixEpoch, (decimal)pricePerHour,
-            billingIncrementMinutes, dailyMaximum: null, freeMinutes: 0, currency));
+        Assert.ThrowsAny<ArgumentException>(() => Tariff.CreateVersion(
+            Guid.CreateVersion7(), Guid.CreateVersion7(), latest: null, DateTimeOffset.UnixEpoch, (decimal)pricePerHour,
+            billingIncrementMinutes, dailyMaximum: null, freeMinutes: 0, currency, now: DateTimeOffset.UnixEpoch));
     }
 
     [Fact]
