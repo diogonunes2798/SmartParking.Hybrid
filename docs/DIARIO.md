@@ -267,3 +267,18 @@ Formato de cada entrada:
   - O achado 4 fica como na F2a (o RFC 9110 permite o 412).
   - O achado 5 fica documentado, sem mudar o comportamento: a zona do sensor é configuração própria (`PUT /sensors/{id}`) e não segue o lugar. Revê-se na F5, quando os contadores por zona precisarem dela.
 - ***Commits:*** `9a593c6` (correções da revisão); registo desta entrada no commit seguinte.
+
+## F2: integração na `main`
+
+- **Data:** 2026-11-25
+- **Feito:**
+  - *Push* do ramo `feat/001-configuracao` (29 *commits*, F2a e F2b) e [PR #2](https://github.com/diogonunes2798/SmartParking.Hybrid/pull/2), pronto para revisão, com o resumo das duas partes, a localização do mapa AC → teste, as decisões que um revisor deve conhecer e os resultados da verificação na descrição.
+  - *Merge* pedido pelo Diogo, com *merge commit* (`f123c86`), como na F1. O GitHub indicava o PR como integrável e sem conflitos.
+  - Planos 001a e 001b e especificação 001 marcados como integrados na `main`.
+  - Este registo foi feito numa *worktree* temporária sobre `origin/main`, para não mudar o ramo da cópia de trabalho principal.
+- **Problemas:**
+  - O repositório continua sem integração contínua, por isso o PR não teve verificações automáticas: a garantia são os resultados locais (201 testes, build e format limpos) registados na descrição.
+- **Decisões:**
+  - *Merge commit* em vez de *squash*: os *commits* da F2a e da F2b referidos neste diário continuam a existir na `main`.
+  - O ramo `feat/001-configuracao` não foi apagado (no `origin` nem localmente); fica para o Diogo decidir.
+- ***Commits:*** `f123c86` (*merge* do PR #2); registo desta entrada no commit seguinte.

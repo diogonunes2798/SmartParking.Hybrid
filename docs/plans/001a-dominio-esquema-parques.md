@@ -1,7 +1,7 @@
 # Plano 001a — Domínio, esquema e parques (F2a)
 
 - **Especificação:** [001-configuracao](../specs/001-configuracao.md) (aprovada a 2026-11-24), secção «Implementação em duas partes»
-- **Estado:** Implementado no ramo `feat/001-configuracao` (2026-11-25): 15 passos, 131 testes a passar, `/verify` e revisão independente feitos (ver [diário](../DIARIO.md), F2a). Por integrar na `main` (PR no fim da F2b, salvo decisão em contrário).
+- **Estado:** Implementado no ramo `feat/001-configuracao` (2026-11-25): 15 passos, 131 testes a passar, `/verify` e revisão independente feitos (ver [diário](../DIARIO.md), F2a). Integrado na `main` com a F2b ([PR #2](https://github.com/diogonunes2798/SmartParking.Hybrid/pull/2), *merge commit* `f123c86`, 2026-11-25).
 - **Desvios aprovados durante a implementação:** `CHECK` de latitude e longitude retirados (o `geography` converte as coordenadas fora do intervalo); validadores na Api e não em Application; sem `SetExpectedVersion`; sem `ConnectionStrings:PostgresMigrations` no `appsettings.json`. Pormenores e razões no diário.
 - **Requisitos:** RF-06 (parques); RNF-06 (auditoria só por acréscimo); preparação de RF-04, UC-02 e UC-05
 - **Ramo:** `feat/001-configuracao` (F2a e F2b no mesmo ramo, um PR no fim da F2b; se o Diogo preferir, um PR por parte)
