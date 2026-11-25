@@ -27,6 +27,21 @@ public sealed class Vehicle
         LicensePlate = NormalizeLicensePlate(licensePlate),
     };
 
+    /// <summary>
+    /// Whether <see cref="NormalizeLicensePlate"/> accepts the value: only letters, digits, spaces and hyphens, and
+    /// 1 to <see cref="LicensePlateMaxLength"/> characters once normalised. Used by the API validator (400).
+    /// </summary>
+    public static bool IsValidLicensePlate(string? licensePlate)
+    {
+        if (string.IsNullOrWhiteSpace(licensePlate) || !licensePlate.All(c => char.IsAsciiLetterOrDigit(c) || c is ' ' or '-'))
+        {
+            return false;
+        }
+
+        var length = licensePlate.Count(char.IsAsciiLetterOrDigit);
+        return length is > 0 and <= LicensePlateMaxLength;
+    }
+
     public static string NormalizeLicensePlate(string licensePlate)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(licensePlate);

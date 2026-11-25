@@ -1,0 +1,151 @@
+### Utilizadores, sessões e pagamento (UC-02, RF-02, especificação 002, F3a)
+# Um pedido por endpoint de «API Contract» de utilizadores e de sessões, por ordem: preparação (parque, zona,
+# lugar e tarifário), condutor, abrir, consultar, fechar, pagar e, no fim, as remoções. Cada pedido usa as respostas
+# dos anteriores (REST Client). O teste HttpFileTests (AC-20) confirma que todos os endpoints de /api/users e
+# /api/sessions estão aqui. As reservas (/api/reservations) entram na F3b.
+# Pré-requisitos: docker compose up -d --wait; migrações como dono (inclui OpenSessionPerVehicle);
+# scripts/db-app-user.sh; Api a correr com o login da aplicação (ver docs/DIARIO.md, F2a).
+
+@baseUrl = http://localhost:5080
+# Operador de referência criado pela migração Initial (HasData).
+@operatorId = 0193a1b0-0000-7000-8000-000000000001
+
+########################################################################## Preparação (já coberta pelo configuration.http)
+
+### Parque aberto todos os dias, quase 24 h (o fecho às 23:59:59 já conta como fechado)
+# @name facility
+POST {{baseUrl}}/api/facilities
+Content-Type: application/json
+
+{
+  "operatorId": "{{operatorId}}",
+  "name": "Parque das Sessões {{$randomInt 1000 9999}}",
+  "address": "Rua da Sofia 1, Coimbra",
+  "latitude": 40.2033,
+  "longitude": -8.4103,
+  "timeZone": "Europe/Lisbon",
+  "openingHours": [
+    { "dayOfWeek": 0, "opensAt": "00:00:00", "closesAt": "23:59:59" },
+    { "dayOfWeek": 1, "opensAt": "00:00:00", "closesAt": "23:59:59" },
+    { "dayOfWeek": 2, "opensAt": "00:00:00", "closesAt": "23:59:59" },
+    { "dayOfWeek": 3, "opensAt": "00:00:00", "closesAt": "23:59:59" },
+    { "dayOfWeek": 4, "opensAt": "00:00:00", "closesAt": "23:59:59" },
+    { "dayOfWeek": 5, "opensAt": "00:00:00", "closesAt": "23:59:59" },
+    { "dayOfWeek": 6, "opensAt": "00:00:00", "closesAt": "23:59:59" }
+  ]
+}
+
+###
+# @name zone
+POST {{baseUrl}}/api/facilities/{{facility.response.body.id}}/zones
+Content-Type: application/json
+
+{ "name": "Piso 0" }
+
+###
+# @name spot
+POST {{baseUrl}}/api/facilities/{{facility.response.body.id}}/spots
+Content-Type: application/json
+
+{ "zoneId": "{{zone.response.body.id}}", "code": "A-{{$randomInt 100 999}}", "type": "Standard" }
+
+### Tarifário de referência da especificação (1,20 €/h, 15 min, 15 minutos grátis, máximo diário 10,00 €).
+# A API só aceita versões que começam agora ou depois: começa daqui a 10 s. Esperar 10 s antes de abrir a sessão.
+POST {{baseUrl}}/api/facilities/{{facility.response.body.id}}/tariffs
+Content-Type: application/json
+
+{
+  "validFrom": "{{$datetime iso8601 10 s}}",
+  "pricePerHour": 1.20,
+  "billingIncrementMinutes": 15,
+  "dailyMaximum": 10.00,
+  "freeMinutes": 15
+}
+
+########################################################################## Condutor (AC-2 a AC-4)
+
+### Registar um condutor (201 + Location; o email fica em minúsculas; repetido dá 409)
+# @name user
+POST {{baseUrl}}/api/users
+Content-Type: application/json
+
+{ "name": "Ana Silva", "email": "Ana.Silva.{{$randomInt 1000 9999}}@Example.PT" }
+
+### Obter o condutor
+GET {{baseUrl}}/api/users/{{user.response.body.id}}
+
+### Registar um veículo (a matrícula fica normalizada: AA12BB...)
+# @name vehicle
+POST {{baseUrl}}/api/users/{{user.response.body.id}}/vehicles
+Content-Type: application/json
+
+{ "licensePlate": "aa-12 b{{$randomInt 1000 9999}}" }
+
+### Listar os veículos (paginado)
+GET {{baseUrl}}/api/users/{{user.response.body.id}}/vehicles?page=1&pageSize=20
+
+### Adicionar um meio de pagamento (o providerToken nunca volta nas respostas)
+# @name card
+POST {{baseUrl}}/api/users/{{user.response.body.id}}/payment-methods
+Content-Type: application/json
+
+{ "type": "Card", "providerToken": "tok_visa_4242", "maskedNumber": "**** 4242", "expiresOn": "2028-12-31" }
+
+### Meio que o gateway simulado recusa (o token começa por decline_)
+# @name declined
+POST {{baseUrl}}/api/users/{{user.response.body.id}}/payment-methods
+Content-Type: application/json
+
+{ "type": "MbWay", "providerToken": "decline_insufficient_funds", "maskedNumber": "*** *** 123" }
+
+### Listar os meios de pagamento (sem providerToken)
+GET {{baseUrl}}/api/users/{{user.response.body.id}}/payment-methods?page=1&pageSize=20
+
+########################################################################## Sessão (AC-5 a AC-19)
+
+### Abrir uma sessão (201 + Location; 409 fora do horário, sem tarifário em vigor ou com outra sessão aberta)
+# @name session
+POST {{baseUrl}}/api/sessions
+Content-Type: application/json
+
+{ "spotId": "{{spot.response.body.id}}", "vehicleId": "{{vehicle.response.body.id}}" }
+
+### Obter a sessão (amount nulo enquanto Open)
+GET {{baseUrl}}/api/sessions/{{session.response.body.id}}
+
+### Fechar a sessão (200 com endedAt e amount; fechar de novo dá 409)
+POST {{baseUrl}}/api/sessions/{{session.response.body.id}}/close
+
+### Pagar com o meio recusado (402 com paymentId; a sessão continua Closed)
+POST {{baseUrl}}/api/sessions/{{session.response.body.id}}/pay
+Content-Type: application/json
+
+{ "paymentMethodId": "{{declined.response.body.id}}" }
+
+### Pagar com o cartão (200: sessão Paid e paymentId; pagar de novo dá 409)
+POST {{baseUrl}}/api/sessions/{{session.response.body.id}}/pay
+Content-Type: application/json
+
+{ "paymentMethodId": "{{card.response.body.id}}" }
+
+########################################################################## Remoções
+
+### Um veículo e um meio sem sessões nem pagamentos
+# @name spareVehicle
+POST {{baseUrl}}/api/users/{{user.response.body.id}}/vehicles
+Content-Type: application/json
+
+{ "licensePlate": "ZZ-{{$randomInt 1000 9999}}" }
+
+###
+# @name spareMethod
+POST {{baseUrl}}/api/users/{{user.response.body.id}}/payment-methods
+Content-Type: application/json
+
+{ "type": "Card", "providerToken": "tok_spare", "maskedNumber": "**** 0000" }
+
+### Remover o veículo (204; um veículo com sessões dá 409)
+DELETE {{baseUrl}}/api/users/{{user.response.body.id}}/vehicles/{{spareVehicle.response.body.id}}
+
+### Remover o meio de pagamento (204; um meio com pagamentos dá 409)
+DELETE {{baseUrl}}/api/users/{{user.response.body.id}}/payment-methods/{{spareMethod.response.body.id}}
