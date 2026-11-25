@@ -11,10 +11,16 @@ namespace SmartParking.Api.Tests.Features.Sessions;
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class PaymentAtomicityTests(ApiFixture fixture)
 {
+    /// <summary>
+    /// The trigger counts its runs in a sequence before failing: <c>nextval</c> is not rolled back, so the count proves
+    /// that the 500 came from this forced failure and not from anything else. <c>SECURITY DEFINER</c> lets the
+    /// application login use the owner's sequence.
+    /// </summary>
     private const string CreateTrigger =
         """
-        CREATE FUNCTION fail_outbox_insert() RETURNS trigger LANGUAGE plpgsql AS
-        'BEGIN RAISE EXCEPTION ''forced outbox failure (AC-14)''; END';
+        CREATE SEQUENCE outbox_failures;
+        CREATE FUNCTION fail_outbox_insert() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS
+        'BEGIN PERFORM nextval(''outbox_failures''); RAISE EXCEPTION ''forced outbox failure (AC-14)''; END';
         CREATE TRIGGER outbox_insert_fails BEFORE INSERT ON outbox_messages
             FOR EACH ROW EXECUTE FUNCTION fail_outbox_insert();
         """;
@@ -46,6 +52,7 @@ public sealed class PaymentAtomicityTests(ApiFixture fixture)
 
         // Assert
         Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+        Assert.True(await DbProbe.ScalarAsync<bool>(owner, "SELECT is_called FROM outbox_failures", cancellationToken));
         Assert.Equal("Closed", await DbProbe.ScalarAsync<string>(owner, "SELECT status FROM parking_sessions WHERE id = $1", cancellationToken, closed.Id));
         Assert.Equal(writesBefore, await DbProbe.ScalarAsync<long>(owner, CountWrites, cancellationToken));
         Assert.Equal(1, SessionApi.ChargeCount(factory.Services, closed.Id, arranged.PaymentMethodId));
