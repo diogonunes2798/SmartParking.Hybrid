@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\SmartParking.Domain\SmartParking.Domain.csproj" />
     <ProjectReference Include="..\..\src\SmartParking.Application\SmartParking.Application.csproj" />
+    <ProjectReference Include="..\..\src\SmartParking.Infrastructure\SmartParking.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

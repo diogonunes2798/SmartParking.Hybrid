@@ -1,0 +1,219 @@
+### Configuração (RF-06, especificação 001)
+# Um pedido por endpoint de «API Contract», por ordem: parques, zonas, lugares (e lote), sensores,
+# tarifários e, no fim, as remoções. Cada pedido usa as respostas dos anteriores (REST Client).
+# O teste ConfigurationHttpFileTests (AC-23) confirma que todos os endpoints de /api estão aqui.
+# Pré-requisitos: docker compose up -d --wait; migrações como dono; scripts/db-app-user.sh;
+# Api a correr com o login da aplicação (ver docs/DIARIO.md, F2a).
+
+@baseUrl = http://localhost:5080
+# Operador de referência criado pela migração Initial (HasData).
+@operatorId = 0193a1b0-0000-7000-8000-000000000001
+
+########################################################################## Parques
+
+### Criar um parque (201 + Location + ETag)
+# @name createFacility
+POST {{baseUrl}}/api/facilities
+Content-Type: application/json
+
+{
+  "operatorId": "{{operatorId}}",
+  "name": "Parque Central {{$randomInt 1000 9999}}",
+  "address": "Rua da Sofia 1, Coimbra",
+  "latitude": 40.2033,
+  "longitude": -8.4103,
+  "timeZone": "Europe/Lisbon",
+  "openingHours": [
+    { "dayOfWeek": 1, "opensAt": "08:00:00", "closesAt": "20:00:00" },
+    { "dayOfWeek": 6, "opensAt": "09:00:00", "closesAt": "13:00:00" }
+  ]
+}
+
+### Listar parques (paginado: page ≥ 1, pageSize 1–100)
+GET {{baseUrl}}/api/facilities?page=1&pageSize=20
+
+### Obter um parque (200 + ETag)
+# @name getFacility
+GET {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}
+
+### Alterar um parque (If-Match obrigatório: 428 sem ele, 412 desatualizado)
+# @name updateFacility
+PUT {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}
+Content-Type: application/json
+If-Match: {{getFacility.response.headers.ETag}}
+
+{
+  "name": "{{createFacility.response.body.name}}",
+  "address": "Rua da Sofia 1, Coimbra",
+  "latitude": 40.2033,
+  "longitude": -8.4103,
+  "timeZone": "Europe/Lisbon",
+  "status": "Active",
+  "openingHours": [
+    { "dayOfWeek": 1, "opensAt": "07:30:00", "closesAt": "21:00:00" }
+  ]
+}
+
+########################################################################## Zonas
+
+### Criar uma zona (201; 409 com o nome repetido no parque)
+# @name createZone
+POST {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/zones
+Content-Type: application/json
+
+{ "name": "Piso 0" }
+
+### Criar uma segunda zona (para mudar um lugar de zona)
+# @name createZone2
+POST {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/zones
+Content-Type: application/json
+
+{ "name": "Piso 1" }
+
+### Listar as zonas do parque
+GET {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/zones?page=1&pageSize=20
+
+### Obter uma zona (200 + ETag)
+# @name getZone
+GET {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/zones/{{createZone2.response.body.id}}
+
+### Alterar uma zona (If-Match)
+# @name updateZone
+PUT {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/zones/{{createZone2.response.body.id}}
+Content-Type: application/json
+If-Match: {{getZone.response.headers.ETag}}
+
+{ "name": "Piso 1 (norte)" }
+
+########################################################################## Lugares
+
+### Criar um lugar (201; 409 código repetido; 400 zona de outro parque)
+# @name createSpot
+POST {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/spots
+Content-Type: application/json
+
+{ "zoneId": "{{createZone.response.body.id}}", "code": "A-001", "type": "Standard" }
+
+### Criar lugares em lote (1 a 1 000, tudo ou nada; cada um com sensor de ocupação opcional)
+# @name createSpotBatch
+POST {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/spots/batch
+Content-Type: application/json
+
+{
+  "spots": [
+    { "zoneId": "{{createZone.response.body.id}}", "code": "A-002", "type": "Accessible",
+      "sensor": { "hardwareId": "HW-{{$randomInt 100000 999999}}-1", "model": "OccuSense 2", "installedAt": "2026-11-01T09:00:00Z" } },
+    { "zoneId": "{{createZone.response.body.id}}", "code": "A-003", "type": "ElectricVehicle" }
+  ]
+}
+
+### Listar os lugares do parque (filtros opcionais zoneId e status)
+GET {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/spots?page=1&pageSize=20&status=Active
+
+### Obter um lugar (200 + ETag)
+# @name getSpot
+GET {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/spots/{{createSpot.response.body.id}}
+
+### Mudar um lugar de zona (SpotUpdated.v1 com previousZoneId; If-Match)
+# @name updateSpot
+PUT {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/spots/{{createSpot.response.body.id}}
+Content-Type: application/json
+If-Match: {{getSpot.response.headers.ETag}}
+
+{ "zoneId": "{{createZone2.response.body.id}}", "code": "A-001", "type": "Standard", "status": "Active" }
+
+########################################################################## Sensores
+
+### Registar um sensor de ocupação num lugar (201; 409 hardwareId repetido ou lugar com sensor)
+# @name registerSensor
+POST {{baseUrl}}/api/sensors
+Content-Type: application/json
+
+{
+  "facilityId": "{{createFacility.response.body.id}}",
+  "hardwareId": "HW-{{$randomInt 100000 999999}}-2",
+  "kind": "Occupancy",
+  "model": "OccuSense 2",
+  "installedAt": "2026-11-01T09:00:00Z",
+  "spotId": "{{createSpot.response.body.id}}"
+}
+
+### Listar sensores (filtros opcionais facilityId e kind)
+GET {{baseUrl}}/api/sensors?facilityId={{createFacility.response.body.id}}&kind=Occupancy
+
+### Obter um sensor (200 + ETag)
+# @name getSensor
+GET {{baseUrl}}/api/sensors/{{registerSensor.response.body.id}}
+
+### Alterar modelo, estado e zona de um sensor (If-Match)
+# @name updateSensor
+PUT {{baseUrl}}/api/sensors/{{registerSensor.response.body.id}}
+Content-Type: application/json
+If-Match: {{getSensor.response.headers.ETag}}
+
+{ "model": "OccuSense 3", "status": "Active", "zoneId": "{{createZone2.response.body.id}}" }
+
+### Reatribuir o sensor a outro lugar do parque (SensorReassigned.v1; 409 lugar com sensor; 400 outro parque)
+# @name assignSensor
+PUT {{baseUrl}}/api/sensors/{{registerSensor.response.body.id}}/spot
+Content-Type: application/json
+If-Match: {{updateSensor.response.headers.ETag}}
+
+{ "spotId": "{{createSpotBatch.response.body.items[1].spotId}}" }
+
+### Soltar o sensor do lugar (200; SensorUnassigned.v1)
+# @name unassignSensor
+DELETE {{baseUrl}}/api/sensors/{{registerSensor.response.body.id}}/spot
+If-Match: {{assignSensor.response.headers.ETag}}
+
+########################################################################## Tarifários
+
+### Criar uma versão de tarifário (201; validFrom ≥ agora, senão 400; fecha a versão anterior)
+# @name createTariff
+POST {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/tariffs
+Content-Type: application/json
+
+{
+  "validFrom": "{{$datetime iso8601 1 d}}",
+  "pricePerHour": 1.20,
+  "billingIncrementMinutes": 15,
+  "dailyMaximum": 12.00,
+  "freeMinutes": 10,
+  "currency": "EUR"
+}
+
+### Listar as versões do parque (da mais antiga para a mais recente)
+GET {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/tariffs?page=1&pageSize=20
+
+### Versão em vigor agora (404 enquanto só houver versões futuras)
+GET {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/tariffs/current
+
+### Obter uma versão (200 + ETag)
+# @name getTariff
+GET {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/tariffs/{{createTariff.response.body.id}}
+
+### Apagar a última versão futura (204; 409 se estiver em vigor, for passada ou não for a última)
+DELETE {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/tariffs/{{createTariff.response.body.id}}
+If-Match: {{getTariff.response.headers.ETag}}
+
+########################################################################## Remoções
+
+### Remover o sensor (204; 409 se ainda estiver num lugar)
+DELETE {{baseUrl}}/api/sensors/{{registerSensor.response.body.id}}
+If-Match: {{unassignSensor.response.headers.ETag}}
+
+### Apagar um lugar (204; 409 se tiver sensor, reservas ou sessões)
+# @name getSpotForDelete
+GET {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/spots/{{createSpot.response.body.id}}
+
+###
+DELETE {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/spots/{{createSpot.response.body.id}}
+If-Match: {{getSpotForDelete.response.headers.ETag}}
+
+### Apagar uma zona (204; 409 se tiver lugares ou sensores)
+DELETE {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}/zones/{{createZone2.response.body.id}}
+If-Match: {{updateZone.response.headers.ETag}}
+
+### Apagar o parque (409 enquanto tiver zonas, lugares, sensores ou tarifários; 204 vazio)
+DELETE {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}
+If-Match: {{updateFacility.response.headers.ETag}}

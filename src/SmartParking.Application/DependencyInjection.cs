@@ -40,7 +40,8 @@ public static class DependencyInjection
 
     private static void AddValidators(IServiceCollection services, Assembly assembly)
     {
-        foreach (var result in AssemblyScanner.FindValidatorsInAssembly(assembly))
+        // Internal validators too: API request validators are internal, like every type not used outside its project.
+        foreach (var result in AssemblyScanner.FindValidatorsInAssembly(assembly, includeInternalTypes: true))
         {
             services.AddScoped(result.InterfaceType, result.ValidatorType);
         }

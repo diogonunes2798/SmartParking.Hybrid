@@ -1,8 +1,11 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using SmartParking.Application.Abstractions;
 using SmartParking.Infrastructure.Cache;
 using SmartParking.Infrastructure.Documents;
+using SmartParking.Infrastructure.Hosting;
 using SmartParking.Infrastructure.Messaging;
 using SmartParking.Infrastructure.Relational;
 
@@ -17,6 +20,10 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
+
+        // Shared by both modes: the clock of every timestamp and the actor written to the audit trail (spec 001).
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<ICurrentActor, AnonymousCurrentActor>();
 
         services.AddOptions<PersistenceOptions>()
             .Bind(configuration.GetSection(PersistenceOptions.SectionName))

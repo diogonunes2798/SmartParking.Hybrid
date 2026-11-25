@@ -7,4 +7,10 @@ public enum ErrorType
     Validation,
     Conflict,
     Unauthorized,
+
+    /// <summary>The <c>If-Match</c> version is stale (spec 001: optimistic concurrency over <c>xmin</c>).</summary>
+    PreconditionFailed,
+
+    /// <summary>A <c>PUT</c> or <c>DELETE</c> arrived without the <c>If-Match</c> version (spec 001).</summary>
+    PreconditionRequired,
 }

@@ -8,6 +8,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Scalar.AspNetCore" />
+    <!-- Design-time only: lets `dotnet ef` use the Api as the startup project. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

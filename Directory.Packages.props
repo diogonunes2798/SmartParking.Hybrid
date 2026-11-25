@@ -12,6 +12,9 @@
 
   <ItemGroup Label="Infrastructure">
     <PackageVersion Include="Npgsql" Version="10.0.4" />
+    <!-- EF Core stays on the 10.x line (11.0.0 follows .NET 11); added in F2a, spec 001. -->
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.4" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL.NetTopologySuite" Version="10.0.4" />
     <PackageVersion Include="MongoDB.Driver" Version="3.14.1" />
     <PackageVersion Include="StackExchange.Redis" Version="3.4.35" />
     <PackageVersion Include="AspNetCore.HealthChecks.NpgSql" Version="9.0.0" />
@@ -26,6 +29,7 @@
     <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.21.0" />
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.21.0" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.15" />
     <PackageVersion Include="Scalar.AspNetCore" Version="3.2.0" />
   </ItemGroup>
 

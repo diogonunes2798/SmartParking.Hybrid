@@ -38,6 +38,12 @@ public sealed record Error
     public static Error Unauthorized(string code, string description) =>
         new(code, description, ErrorType.Unauthorized, EmptyErrors);
 
+    public static Error PreconditionFailed(string code, string description) =>
+        new(code, description, ErrorType.PreconditionFailed, EmptyErrors);
+
+    public static Error PreconditionRequired(string code, string description) =>
+        new(code, description, ErrorType.PreconditionRequired, EmptyErrors);
+
     public static Error Validation(string code, string description, IReadOnlyDictionary<string, string[]> errors)
     {
         ArgumentNullException.ThrowIfNull(errors);
