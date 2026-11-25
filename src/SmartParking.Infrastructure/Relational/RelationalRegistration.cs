@@ -3,6 +3,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using SmartParking.Application.Abstractions.Persistence;
+using SmartParking.Application.Abstractions.Reading;
+using SmartParking.Infrastructure.Relational.Reading;
+using SmartParking.Infrastructure.Relational.Repositories;
 
 namespace SmartParking.Infrastructure.Relational;
 
@@ -36,6 +39,10 @@ internal static class RelationalRegistration
         services.AddDbContext<SmartParkingDbContext>((provider, options) =>
             options.UseNpgsql(provider.GetRequiredService<NpgsqlDataSource>(), npgsql => npgsql.UseNetTopologySuite()));
         services.AddScoped<IUnitOfWork>(provider => provider.GetRequiredService<SmartParkingDbContext>());
+
+        // Configuration ports (spec 001): one repository per aggregate root, one read port per query family.
+        services.AddScoped<IParkingFacilityRepository, ParkingFacilityRepository>();
+        services.AddScoped<IFacilityReader, FacilityReader>();
 
         healthChecks.AddNpgSql(
             sp => sp.GetRequiredService<NpgsqlDataSource>(),
