@@ -51,4 +51,41 @@ public sealed class ReservationConcurrencyTests(ApiFixture fixture)
         Assert.Equal(cancelWon ? 0 : 1, await DbProbe.ScalarAsync<long>(
             App, "SELECT count(*) FROM parking_sessions WHERE vehicle_id = $1", cancellationToken, arranged.VehicleId));
     }
+
+    [Fact]
+    public async Task Cancel_RowChangedAfterRead_Returns409ConcurrentChange_AC27()
+    {
+        // Arrange: in the race above the cancel takes the row lock first, so it always wins; here another write
+        // changes the reservation between the cancel's read and its save, so the cancel is the one that loses.
+        var cancellationToken = TestContext.Current.CancellationToken;
+        fixture.Clock.SetUtcNow(Wednesday10);
+        using var client = fixture.Hooked.CreateClient();
+        var arranged = await SessionApi.ArrangeAsync(client, fixture.Clock, cancellationToken);
+        var reservation = await ReservationApi.CreateOkAsync(client, ReservationApi.Request(arranged), cancellationToken);
+        fixture.Clock.Advance(TimeSpan.FromMinutes(1));
+        fixture.Hook.Arm(reservation.Id, token => DbProbe.ExecuteAsync(
+            fixture.Databases.OwnerConnectionString, "UPDATE reservations SET status = status WHERE id = $1", token, reservation.Id));
+
+        // Act
+        HttpResponseMessage response;
+        try
+        {
+            response = await ReservationApi.CancelAsync(client, reservation.Id, cancellationToken);
+        }
+        finally
+        {
+            fixture.Hook.Disarm();
+        }
+
+        // Assert
+        using (response)
+        {
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+            Assert.Contains("Reservation.ConcurrentChange", await response.Content.ReadAsStringAsync(cancellationToken), StringComparison.Ordinal);
+        }
+
+        Assert.Equal("Active", await ReservationApi.StatusAsync(App, reservation.Id, cancellationToken));
+        Assert.Equal(["ReservationCreated.v1"], await ReservationApi.OutboxTypesAsync(App, reservation.Id, cancellationToken));
+    }
 }

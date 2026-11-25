@@ -16,6 +16,8 @@ public sealed class ApiFixture : IAsyncLifetime
 
     private ConfiguredFactory<Program>? gated;
 
+    private ConfiguredFactory<Program>? hooked;
+
     public DatabaseContainers Databases { get; } = new();
 
     /// <summary>One Api host in Hybrid mode shared by the feature tests (spec 001), created on first use.</summary>
@@ -30,6 +32,16 @@ public sealed class ApiFixture : IAsyncLifetime
     /// <summary>An Api host in Hybrid mode with the <see cref="Clock"/> (spec 002), created on first use.</summary>
     public ConfiguredFactory<Program> Sessions => sessions ??= CreateFactory(configureServices: UseClock);
 
+    /// <summary>The after-read hook of the <see cref="Hooked"/> host (a stale <c>xmin</c> on one reservation, AC-24/AC-27).</summary>
+    internal AfterReadHook Hook { get; } = new();
+
+    /// <summary>Like <see cref="Sessions"/>, with the <see cref="Hook"/> behind the reservation repository.</summary>
+    public ConfiguredFactory<Program> Hooked => hooked ??= CreateFactory(configureServices: services =>
+    {
+        UseClock(services);
+        AfterReadReservationRepository.Decorate(services, Hook);
+    });
+
     /// <summary>Like <see cref="Sessions"/>, with the <see cref="Gate"/> in front of the unit of work.</summary>
     public ConfiguredFactory<Program> Gated => gated ??= CreateFactory(configureServices: services =>
     {
@@ -41,7 +53,7 @@ public sealed class ApiFixture : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
-        foreach (var factory in new[] { hybrid, sessions, gated })
+        foreach (var factory in new[] { hybrid, sessions, gated, hooked })
         {
             if (factory is not null)
             {
