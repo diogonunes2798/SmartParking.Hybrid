@@ -1,7 +1,9 @@
 using System.Reflection;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using SmartParking.Application.Abstractions.Messaging;
+using SmartParking.Application.Features.Ingestion;
 
 namespace SmartParking.Application;
 
@@ -19,6 +21,9 @@ public static class DependencyInjection
             AddHandlers(services, assembly);
             AddValidators(services, assembly);
         }
+
+        // Instruments of the SmartParking.Ingestion meter (spec 003); IMeterFactory comes from the host.
+        services.TryAddSingleton<IngestionMetrics>();
 
         return services;
     }

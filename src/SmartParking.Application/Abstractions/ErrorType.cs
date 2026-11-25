@@ -16,4 +16,7 @@ public enum ErrorType
 
     /// <summary>The payment gateway declined the charge (spec 002, 402); the failed payment is recorded.</summary>
     PaymentDeclined,
+
+    /// <summary>A store the operation needs is unreachable; the caller may retry (spec 003, 503 with <c>Retry-After</c>).</summary>
+    Unavailable,
 }

@@ -60,6 +60,9 @@ public sealed record Error
     public static Error PaymentDeclined(string code, string description, Guid paymentId) =>
         new(code, description, ErrorType.PaymentDeclined, EmptyErrors, new Dictionary<string, object?> { ["paymentId"] = paymentId });
 
+    public static Error Unavailable(string code, string description) =>
+        new(code, description, ErrorType.Unavailable, EmptyErrors);
+
     public static Error Validation(string code, string description, IReadOnlyDictionary<string, string[]> errors)
     {
         ArgumentNullException.ThrowIfNull(errors);
