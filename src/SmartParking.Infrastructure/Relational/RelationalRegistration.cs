@@ -52,6 +52,12 @@ internal static class RelationalRegistration
         services.AddScoped<ITariffRepository, TariffRepository>();
         services.AddScoped<ITariffReader, TariffReader>();
 
+        // Users, sessions and payments (spec 002), the same in both modes.
+        services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IUserReader, UserReader>();
+        services.AddScoped<IParkingSessionRepository, ParkingSessionRepository>();
+        services.AddScoped<ISessionReader, SessionReader>();
+
         healthChecks.AddNpgSql(
             sp => sp.GetRequiredService<NpgsqlDataSource>(),
             name: HealthCheckName,

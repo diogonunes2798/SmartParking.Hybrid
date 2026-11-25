@@ -8,6 +8,7 @@ using SmartParking.Infrastructure.Documents;
 using SmartParking.Infrastructure.Hosting;
 using SmartParking.Infrastructure.Messaging;
 using SmartParking.Infrastructure.Relational;
+using SmartParking.Infrastructure.Payments;
 
 namespace SmartParking.Infrastructure;
 
@@ -57,7 +58,8 @@ public static class DependencyInjection
             .AddRelational(configuration, healthChecks, timeout)
             .AddDocuments(configuration, healthChecks, timeout)
             .AddCache(configuration, healthChecks, timeout)
-            .AddMessaging();
+            .AddMessaging()
+            .AddPayments();
 
     /// <summary>Monolithic mode: PostgreSQL only. Extension point for the monolithic port implementations (F9).</summary>
     private static IServiceCollection AddMonolithicPersistence(
@@ -67,5 +69,6 @@ public static class DependencyInjection
         TimeSpan timeout) =>
         services
             .AddRelational(configuration, healthChecks, timeout)
-            .AddMessaging();
+            .AddMessaging()
+            .AddPayments();
 }

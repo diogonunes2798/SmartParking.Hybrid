@@ -13,4 +13,7 @@ public enum ErrorType
 
     /// <summary>A <c>PUT</c> or <c>DELETE</c> arrived without the <c>If-Match</c> version (spec 001).</summary>
     PreconditionRequired,
+
+    /// <summary>The payment gateway declined the charge (spec 002, 402); the failed payment is recorded.</summary>
+    PaymentDeclined,
 }

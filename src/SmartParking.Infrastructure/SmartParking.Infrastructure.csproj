@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="SmartParking.UnitTests" />
+    <!-- The session tests read the charge count of the simulated payment gateway (spec 002, plan 002a). -->
+    <InternalsVisibleTo Include="SmartParking.Api.Tests" />
   </ItemGroup>
 
   <ItemGroup Label="Relational SQL">

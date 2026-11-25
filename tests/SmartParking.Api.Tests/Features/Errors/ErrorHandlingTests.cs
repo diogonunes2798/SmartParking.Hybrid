@@ -82,4 +82,25 @@ public sealed class ErrorHandlingTests
         Assert.True(problem.RootElement.TryGetProperty("traceId", out _));
         Assert.False(problem.RootElement.TryGetProperty("errors", out _));
     }
+
+    [Fact]
+    public async Task ErrorToProblem_PaymentDeclined_Maps402WithPaymentId()
+    {
+        // Arrange
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var factory = ApiFixture.CreateFactory(DatabaseContainers.UnreachableSettings(PersistenceMode.Hybrid));
+        using var client = factory.CreateClient();
+
+        // Act
+        using var response = await client.GetAsync(
+            new Uri($"{TestEndpoints.Errors}/{ErrorType.PaymentDeclined}", UriKind.Relative), cancellationToken);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+
+        // Assert
+        Assert.Equal(HttpStatusCode.PaymentRequired, response.StatusCode);
+        Assert.Equal(ProblemJson, response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(402, problem.RootElement.GetProperty("status").GetInt32());
+        Assert.Equal(TestEndpoints.DeclinedPaymentId, problem.RootElement.GetProperty("paymentId").GetGuid());
+        Assert.True(problem.RootElement.TryGetProperty("traceId", out _));
+    }
 }

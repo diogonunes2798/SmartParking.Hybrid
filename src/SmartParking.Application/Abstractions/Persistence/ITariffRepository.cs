@@ -10,6 +10,12 @@ public interface ITariffRepository
     /// <summary>The latest version of a facility (the only open one), or <c>null</c> when it has none.</summary>
     Task<Tariff?> GetLatestAsync(Guid facilityId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// The version of a facility in force at <paramref name="at"/> (valid in [ValidFrom, ValidTo)), or <c>null</c>
+    /// (compiled query; read only, not tracked). A session keeps this version until it closes (spec 002).
+    /// </summary>
+    Task<Tariff?> GetInForceAsync(Guid facilityId, DateTimeOffset at, CancellationToken cancellationToken);
+
     /// <summary>The version that <paramref name="version"/> closed when it was created, or <c>null</c> when it was the first.</summary>
     Task<Tariff?> GetClosedByAsync(Tariff version, CancellationToken cancellationToken);
 

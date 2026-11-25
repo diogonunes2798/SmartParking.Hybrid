@@ -25,6 +25,9 @@ internal sealed class TestEndpoints : IEndpointGroup
     /// <summary>Must never reach the client outside Development (AC-10).</summary>
     public const string SecretMessage = "sensitive-internal-detail";
 
+    /// <summary>The <c>paymentId</c> extension of the 402 test error (spec 002).</summary>
+    public static readonly Guid DeclinedPaymentId = new("0193a1b0-0000-7000-8000-0000000000d2");
+
     public static void Register(IServiceCollection services)
     {
         services.AddSingleton<IEndpointGroup, TestEndpoints>();
@@ -56,6 +59,7 @@ internal sealed class TestEndpoints : IEndpointGroup
         ErrorType.Unauthorized => Error.Unauthorized("Test.Unauthorized", "Unauthorized."),
         ErrorType.PreconditionFailed => Error.PreconditionFailed("Test.PreconditionFailed", "Stale version."),
         ErrorType.PreconditionRequired => Error.PreconditionRequired("Test.PreconditionRequired", "If-Match is required."),
+        ErrorType.PaymentDeclined => Error.PaymentDeclined("Test.PaymentDeclined", "Declined.", DeclinedPaymentId),
         ErrorType.Validation => Error.Validation(
             "Test.Validation",
             "Invalid.",

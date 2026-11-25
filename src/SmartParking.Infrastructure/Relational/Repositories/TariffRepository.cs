@@ -18,7 +18,18 @@ internal sealed class TariffRepository(SmartParkingDbContext db) : ITariffReposi
         EF.CompileAsyncQuery((SmartParkingDbContext context, Guid facilityId, CancellationToken _) =>
             context.Tariffs.FirstOrDefault(tariff => tariff.FacilityId == facilityId && tariff.ValidTo == null));
 
+    // Hot path of opening a session (spec 002): read only, so not tracked.
+    private static readonly Func<SmartParkingDbContext, Guid, DateTimeOffset, CancellationToken, Task<Tariff?>> InForce =
+        EF.CompileAsyncQuery((SmartParkingDbContext context, Guid facilityId, DateTimeOffset at, CancellationToken _) =>
+            context.Tariffs
+                .AsNoTracking()
+                .FirstOrDefault(tariff =>
+                    tariff.FacilityId == facilityId && tariff.ValidFrom <= at && (tariff.ValidTo == null || tariff.ValidTo > at)));
+
     public Task<Tariff?> GetByIdAsync(Guid id, CancellationToken cancellationToken) => ById(db, id, cancellationToken);
+
+    public Task<Tariff?> GetInForceAsync(Guid facilityId, DateTimeOffset at, CancellationToken cancellationToken) =>
+        InForce(db, facilityId, at, cancellationToken);
 
     public Task<Tariff?> GetLatestAsync(Guid facilityId, CancellationToken cancellationToken) =>
         LatestOf(db, facilityId, cancellationToken);

@@ -13,12 +13,21 @@ public sealed record Error
     private static readonly IReadOnlyDictionary<string, string[]> EmptyErrors =
         new Dictionary<string, string[]>();
 
-    private Error(string code, string description, ErrorType type, IReadOnlyDictionary<string, string[]> validationErrors)
+    private static readonly IReadOnlyDictionary<string, object?> EmptyExtensions =
+        new Dictionary<string, object?>();
+
+    private Error(
+        string code,
+        string description,
+        ErrorType type,
+        IReadOnlyDictionary<string, string[]> validationErrors,
+        IReadOnlyDictionary<string, object?>? extensions = null)
     {
         Code = code;
         Description = description;
         Type = type;
         ValidationErrors = validationErrors;
+        Extensions = extensions ?? EmptyExtensions;
     }
 
     public string Code { get; }
@@ -28,6 +37,9 @@ public sealed record Error
     public ErrorType Type { get; }
 
     public IReadOnlyDictionary<string, string[]> ValidationErrors { get; }
+
+    /// <summary>Extra members of the ProblemDetails (for example the <c>paymentId</c> of a declined payment).</summary>
+    public IReadOnlyDictionary<string, object?> Extensions { get; }
 
     public static Error NotFound(string code, string description) =>
         new(code, description, ErrorType.NotFound, EmptyErrors);
@@ -43,6 +55,10 @@ public sealed record Error
 
     public static Error PreconditionRequired(string code, string description) =>
         new(code, description, ErrorType.PreconditionRequired, EmptyErrors);
+
+    /// <summary>402: the gateway declined the charge; <paramref name="paymentId"/> is the recorded failed payment (spec 002).</summary>
+    public static Error PaymentDeclined(string code, string description, Guid paymentId) =>
+        new(code, description, ErrorType.PaymentDeclined, EmptyErrors, new Dictionary<string, object?> { ["paymentId"] = paymentId });
 
     public static Error Validation(string code, string description, IReadOnlyDictionary<string, string[]> errors)
     {
