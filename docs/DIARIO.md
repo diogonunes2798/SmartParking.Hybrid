@@ -390,3 +390,18 @@ Formato de cada entrada:
   5. Testes: o caso negativo do AC-25 só verificava o 409, não o código do erro (**corrigido:** cada caso verifica `Session.OutsideFulfilmentWindow` ou `Session.ReservationMismatch`); os *hosts* criados por `CreateFactory` nos testes dos Workers correm o *worker* real com o relógio do sistema (inofensivo enquanto os testes correm em série e verificam por id).
   6. *Nits*: o validador compara os instantes antes da normalização ao microssegundo; o `ListDueIdsAsync` não tem limite de lote; a mensagem de `Reservation.NotActive`.
 - ***Commits:*** `4f1b61b`, `3bf1248`, `fd1bf5f`, `9b84572`, `27040a3`, `6d2d73c`, `25b5489`, `41cf95d`, `b9fcac2`, `ed7debd`, `e09a33f`, `97eaf2d`, `eeb5847`, `a850710`, `d8d35cd`, `ea71e7c`, `7c306f8`, `0bce65c`, `209c7b7` e o desta atualização do diário. PR [#3](https://github.com/diogonunes2798/SmartParking.Hybrid/pull/3) (F3a e F3b para a `main`), aberto com o OK do Diogo a 2026-11-25; por integrar.
+
+## F3: integração na `main`
+
+- **Data:** 2026-11-25
+- **Feito:**
+  - *Push* do ramo `feat/002-sessoes-pagamentos` (32 *commits*, F3a e F3b) e [PR #3](https://github.com/diogonunes2798/SmartParking.Hybrid/pull/3), aberto com o OK do Diogo, com o resumo das duas partes, os resultados da verificação e os limites conhecidos na descrição.
+  - *Merge* pedido pelo Diogo, com *merge commit* (`b1d7e6e`), como na F1 e na F2. O GitHub indicava o PR como integrável e sem conflitos, e o `HEAD` do PR era o mesmo da cópia local (`4e6b015`, verificado com `--match-head-commit`).
+  - Planos 002a e 002b e especificação 002 marcados como integrados na `main`.
+  - Este registo foi feito numa *worktree* temporária sobre `origin/main`, para não mudar o ramo da cópia de trabalho principal.
+- **Problemas:**
+  - O repositório continua sem integração contínua, por isso o PR não teve verificações automáticas: a garantia são os resultados locais (385 testes em duas corridas seguidas, build e format limpos) registados na descrição.
+- **Decisões:**
+  - *Merge commit* em vez de *squash*: os *commits* da F3a e da F3b referidos neste diário continuam a existir na `main`.
+  - O ramo `feat/002-sessoes-pagamentos` ainda não foi apagado: fica à espera do pedido do Diogo, como na F1 e na F2.
+- ***Commits:*** `b1d7e6e` (*merge* do PR #3); registo desta entrada no commit seguinte.
