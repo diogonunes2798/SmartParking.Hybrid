@@ -368,6 +368,7 @@ Formato de cada entrada:
     - «uma só unidade de trabalho para toda a passagem» não faz falhar o AC-28, porque a unidade de trabalho já limpa o *change tracker* depois de uma gravação falhada (F2). A premissa do plano estava errada; a mutação que de facto viola o AC-28 é parar a passagem no conflito, e essa é apanhada. As transações por *scope* ficam como defesa;
     - «sem a conversão 412 → 409 no cancelamento» passou quatro vezes: na corrida do AC-27 o `UPDATE` do cancelamento chega sempre primeiro ao bloqueio da linha, por isso o ramo «o cancelamento perde» nunca corria. Acrescentou-se um teste determinístico (o gancho pós-leitura altera a linha entre a leitura e a gravação do cancelamento), que apanha a mutação.
   - Um *heredoc* voltou a ficar pendurado no Git Bash (lição já registada); foi parado e os ficheiros foram escritos diretamente.
+  - Desde o fecho da F3a (`7539a19`), a linha do RF-02 na Tabela 13 da RASTREABILIDADE tinha as colunas da matriz (AC, especificação, código, testes) em vez do texto do requisito. Foi reposta com a redação da tese dada pelo Diogo («Ciclo de vida das sessões», UC-02, prioridade Alta); a rastreabilidade fica na linha da matriz.
   - Desta vez o `TaskStop` não deixou processos órfãos da Api nem dos Workers (confirmado pelo nome).
 - **Decisões:**
   - Pontos 1 a 3 e propostas 4 a 15 do plano 002b, aprovados com ele; ADR 0007.
