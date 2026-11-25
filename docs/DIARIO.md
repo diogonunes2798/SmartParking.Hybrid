@@ -309,4 +309,38 @@ Formato de cada entrada:
   - Uma única alteração ao esquema, aditiva: o índice único parcial das sessões `Open` por veículo.
   - Os Workers passam a ligar como papel da aplicação, o que fecha o ponto em aberto da F2.
   - Implementação dividida em F3a e F3b.
-- ***Commits:*** por fazer.
+- ***Commits:*** `60238a0` (especificação aprovada).
+
+## F3a: utilizadores, sessões e pagamento (especificação 002)
+
+- **Data:** 2026-11-25
+- **Feito:**
+  - Plano aprovado pelo Diogo ([002a](plans/002a-utilizadores-sessoes-pagamento.md)), com as decisões 1 a 4 (2026-11-25) e as propostas 5 a 12. Ramo `feat/002-sessoes-pagamentos`.
+  - Auditoria por entidade alterada na unidade de trabalho ([ADR 0006](adr/0006-auditoria-por-entidade-alterada.md)): `AggregateRoot.Raise(evento, entidades alteradas)`, uma `OutboxMessage` por evento e uma `AuditEntry` por entidade, com o mesmo `outboxMessageId`. Os 201 testes da F2 passaram sem alterações depois da mudança. O `providerToken` fica fora da auditoria (`AuditExclusions`).
+  - Migração aditiva `OpenSessionPerVehicle` (índice único parcial `ux_parking_sessions_vehicle_open`), aplicada também à base do `compose.yaml`.
+  - Domain: `User` com veículos e meios de pagamento (cinco eventos); `ParkingSession` com `Open`, `Close` e `RecordPayment` (quatro eventos), sem nenhum método que saia de `Paid`; `SessionPricing`; `ParkingFacility.IsOpenAt`.
+  - Application e Infrastructure: `IUserRepository`, `IParkingSessionRepository`, `IUserReader`, `ISessionReader`, `GetInForceAsync` no `ITariffRepository`; duas consultas compiladas (sessão aberta de um veículo, tarifário em vigor); `IPaymentGateway` e `FakePaymentGateway` em `Infrastructure/Payments`; `Error.PaymentDeclined` (402, com `paymentId`).
+  - Api: `UserEndpoints` e `SessionEndpoints`; `tests/http/sessions.http`.
+  - Testes: AC-1 a AC-21 da F3a; 303 testes a passar (201 antes da F3a), em duas corridas seguidas. Testes de mutação: sem o pagamento nas entidades do `SessionPaid`, o AC-12 falha; sem a conversão 412 → 409, o AC-11 falha; sem o `Lazy` no gateway, o AC-16 e o teste unitário do gateway falham.
+  - Verificação manual contra o `compose.yaml`, com a Api ligada como `smartparking_api`: o percurso do `sessions.http` deu os 27 códigos esperados (incluindo 409 antes de o tarifário entrar em vigor, 402 com `paymentId` e 409 ao apagar um meio com pagamento). Na base, a sessão deixou quatro mensagens por publicar (`SessionOpened`, `SessionClosed`, `PaymentFailed`, `SessionPaid`), com ator `anonymous`, e duas auditorias no `SessionPaid`; o `providerToken` não aparece na auditoria nem na *outbox*; nenhuma mensagem órfã.
+  - Roslyn: dependências só para dentro (`get_project_graph`); portas e gateway registados sem duplicados nem dependências cativas (`get_di_registrations`); 0 diagnósticos. O `detect_antipatterns` só assinalou ficheiros gerados, métodos de teste e repositórios de escrita com *tracking* intencional, como na F2.
+- **Problemas:**
+  - O teste do AC-23 da F2 exigia que o `configuration.http` cobrisse todas as rotas `/api`. Os *endpoints* novos fá-lo-iam falhar; passou a verificar cada ficheiro `.http` contra os seus prefixos (proposta 12).
+  - Com o relógio de teste parado, duas transições seguidas ficam com o mesmo `occurred_at`, e a ordem das auditorias e mensagens por `occurred_at, id` deixa de ser fiável (UUID v7 do mesmo milissegundo). Falharam três testes, um deles intermitente (o AC-13 passou por acaso na primeira corrida). Os testes passaram a avançar o relógio entre transições.
+  - Um *heredoc* falhou no Git Bash (já registado na memória do projeto); os ficheiros passaram a ser escritos diretamente.
+  - O `hooks/post-test-analyze.sh` referido em `.claude/rules/hooks.md` não existe no repositório; os resultados foram lidos diretamente da saída do `dotnet test`.
+  - O `TaskStop` voltou a deixar o processo `SmartParking.Api` órfão na porta 5080, como na F1 e na F2; foi identificado pelo nome e terminado.
+  - O `dotnet ef migrations add` exige a variável `ConnectionStrings__PostgresMigrations` mesmo sem ligar à base; foi passada uma cadeia sem palavra-passe.
+- **Decisões:**
+  - Decisões 1 a 4 do plano 002a, tomadas com o Diogo a 2026-11-25: `FakePaymentGateway` em `Infrastructure/Payments`; `reservationId` dá 409 até à F3b; blocos arredondados por período de 24 h, com ou sem máximo diário; horário `[opensAt, closesAt)`.
+  - Propostas 5 a 12 do plano, aprovadas com ele, implementadas sem desvios.
+  - O índice da FK `ix_parking_sessions_vehicle_id` foi declarado de forma explícita, para a migração ficar aditiva; o `Up` gerado só tem o `CreateIndex`.
+  - Desvios ao plano: a sessão e o utilizador tiveram *commits* de Api juntos com as *fixtures* (o `SessionApi` usa os DTO das sessões); o teste do 402 ficou em `ErrorHandlingTests` (integração) além do `ErrorTests` (unitário).
+- **Revisão independente** (`code-reviewer`, só leitura, sobre `git diff main...HEAD -- src tests`): sem erros contra a especificação 002 nem violações das regras do projeto. Achados, a tratar com o acordo do Diogo:
+  1. **Recusa concorrente com um pagamento aprovado (confirmado).** Na recusa, a sessão não está entre as entidades alteradas e não é «tocada» (ADR 0006), por isso o seu `xmin` não é verificado. Se um pagamento aprovado com o meio X e uma recusa com o meio Y correrem em simultâneo, a recusa grava um `Payment` `Failed` e um `PaymentFailed.v1` numa sessão já `Paid` e responde 402. A secção «Edge Cases» da especificação pede 200 e 409 para dois pagamentos concorrentes. Correção proposta: na recusa, verificar o `xmin` da sessão sem lhe escrever auditoria (o AC-13 pede uma só).
+  2. **Dois pagamentos concorrentes com meios diferentes cobram duas vezes**, e a cobrança perdedora fica sem `Payment`. A especificação aceita-o («outro meio é uma tentativa nova»; reembolsos fora do âmbito), mas é um limite de cobrar fora da transação, a registar para as secções 5.9 e 7.8.
+  3. *Nit* de teste: a barreira de concorrência pode ficar armada depois de um teste falhar e contaminar o seguinte.
+  4. *Nit* de teste: o AC-14 aceita qualquer 500; podia confirmar que a falha veio do *trigger*.
+  5. *Nit*: `FindSystemTimeZoneById` em cada abertura (o .NET guarda-o em cache).
+  6. *Nit*: com `[opensAt, closesAt)` e `opensAt < closesAt`, um parque aberto 24 h não se representa (o último segundo do dia fica fechado); é coerente com a especificação 001.
+- ***Commits:*** `f8f8d21`, `b39a6b3`, `ef4b139`, `ca0e141`, `7a4d524`, `6706c4b`, `a5c9a32`.
