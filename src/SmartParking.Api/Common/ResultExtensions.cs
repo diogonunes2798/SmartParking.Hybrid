@@ -31,6 +31,9 @@ internal static class ResultExtensions
             ErrorType.PreconditionFailed => Problem(error, StatusCodes.Status412PreconditionFailed),
             ErrorType.PreconditionRequired => Problem(error, StatusCodes.Status428PreconditionRequired),
             ErrorType.PaymentDeclined => Problem(error, StatusCodes.Status402PaymentRequired),
+
+            // The endpoint sets Retry-After, since only it knows the configured delay (spec 003).
+            ErrorType.Unavailable => Problem(error, StatusCodes.Status503ServiceUnavailable),
             _ => throw new ArgumentOutOfRangeException(nameof(error), error.Type, "Unknown error type."),
         };
     }
