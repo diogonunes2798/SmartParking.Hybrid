@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <Compile Include="..\Common\*.cs" Link="Common\%(Filename)%(Extension)" />
+    <Using Include="SmartParking.Tests.Common" />
   </ItemGroup>
 
 </Project>

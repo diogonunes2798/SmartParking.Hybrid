@@ -28,7 +28,7 @@ public sealed class PaymentMethod
 
     public DateOnly? ExpiresOn { get; private init; }
 
-    public static PaymentMethod Create(
+    internal static PaymentMethod Create(
         Guid id,
         Guid userId,
         PaymentMethodType type,

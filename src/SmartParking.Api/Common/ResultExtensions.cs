@@ -30,10 +30,16 @@ internal static class ResultExtensions
             ErrorType.Unauthorized => Problem(error, StatusCodes.Status401Unauthorized),
             ErrorType.PreconditionFailed => Problem(error, StatusCodes.Status412PreconditionFailed),
             ErrorType.PreconditionRequired => Problem(error, StatusCodes.Status428PreconditionRequired),
+            ErrorType.PaymentDeclined => Problem(error, StatusCodes.Status402PaymentRequired),
             _ => throw new ArgumentOutOfRangeException(nameof(error), error.Type, "Unknown error type."),
         };
     }
 
+    /// <summary>The error's extensions (for example the <c>paymentId</c> of a declined payment) become ProblemDetails members.</summary>
     private static ProblemHttpResult Problem(Error error, int statusCode) =>
-        TypedResults.Problem(detail: error.Description, statusCode: statusCode, title: error.Code);
+        TypedResults.Problem(
+            detail: error.Description,
+            statusCode: statusCode,
+            title: error.Code,
+            extensions: error.Extensions.Count == 0 ? null : error.Extensions);
 }

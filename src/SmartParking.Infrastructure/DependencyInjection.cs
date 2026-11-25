@@ -2,12 +2,14 @@ using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using SmartParking.Application.Abstractions;
 using SmartParking.Infrastructure.Cache;
 using SmartParking.Infrastructure.Documents;
 using SmartParking.Infrastructure.Hosting;
 using SmartParking.Infrastructure.Messaging;
 using SmartParking.Infrastructure.Relational;
+using SmartParking.Infrastructure.Payments;
 
 namespace SmartParking.Infrastructure;
 
@@ -29,6 +31,13 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(PersistenceOptions.SectionName))
             .Validate(options => PersistenceOptions.TryParseMode(options.Mode, out _), PersistenceOptions.ValidationMessage)
             .ValidateOnStart();
+
+        // Shared by both modes: the reservation rules, handed to the Application as a Domain policy (plan 002b, 5).
+        services.AddOptions<ReservationOptions>()
+            .Bind(configuration.GetSection(ReservationOptions.SectionName))
+            .Validate(options => options.IsValid(), ReservationOptions.ValidationMessage)
+            .ValidateOnStart();
+        services.TryAddSingleton(provider => provider.GetRequiredService<IOptions<ReservationOptions>>().Value.ToPolicy());
 
         if (!PersistenceOptions.TryParseMode(configuration[PersistenceOptions.ModeKey], out var mode))
         {
@@ -57,7 +66,8 @@ public static class DependencyInjection
             .AddRelational(configuration, healthChecks, timeout)
             .AddDocuments(configuration, healthChecks, timeout)
             .AddCache(configuration, healthChecks, timeout)
-            .AddMessaging();
+            .AddMessaging()
+            .AddPayments();
 
     /// <summary>Monolithic mode: PostgreSQL only. Extension point for the monolithic port implementations (F9).</summary>
     private static IServiceCollection AddMonolithicPersistence(
@@ -67,5 +77,6 @@ public static class DependencyInjection
         TimeSpan timeout) =>
         services
             .AddRelational(configuration, healthChecks, timeout)
-            .AddMessaging();
+            .AddMessaging()
+            .AddPayments();
 }

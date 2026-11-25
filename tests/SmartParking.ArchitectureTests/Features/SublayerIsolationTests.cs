@@ -10,6 +10,7 @@ public sealed class SublayerIsolationTests
     private const string Documents = InfrastructureNamespace + ".Documents";
     private const string Cache = InfrastructureNamespace + ".Cache";
     private const string Hosting = InfrastructureNamespace + ".Hosting";
+    private const string Payments = InfrastructureNamespace + ".Payments";
 
     [Fact]
     public void RelationalSublayer_Inspected_UsesNeitherMongoNorRedis_AC2()
@@ -39,6 +40,23 @@ public sealed class SublayerIsolationTests
         var result = Types.InAssembly(InfrastructureAssembly)
             .That().ResideInNamespace(sublayer)
             .ShouldNot().HaveDependencyOnAny("Microsoft.EntityFrameworkCore", Relational, sibling, Hosting)
+            .GetResult();
+
+        // Assert
+        Assert.True(result.IsSuccessful, RuleFailures.Describe(result));
+    }
+
+    [Fact]
+    public void PaymentsAdapter_Inspected_UsesNoPersistenceSublayer()
+    {
+        // Arrange (spec 002, plan 002a: the payment gateway lives outside the persistence sublayers)
+        AssertHasTypes(Payments);
+
+        // Act
+        var result = Types.InAssembly(InfrastructureAssembly)
+            .That().ResideInNamespace(Payments)
+            .ShouldNot().HaveDependencyOnAny(
+                "Microsoft.EntityFrameworkCore", "MongoDB.Driver", "MongoDB.Bson", "StackExchange.Redis", Relational, Documents, Cache)
             .GetResult();
 
         // Assert
