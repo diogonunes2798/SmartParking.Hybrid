@@ -1,7 +1,7 @@
 # Plano 002b — Reservas e *worker* de expiração (F3b)
 
 - **Especificação:** [002-sessoes-pagamentos](../specs/002-sessoes-pagamentos.md) (aprovada a 2026-11-25), secção «Implementação em duas partes»
-- **Estado:** Aprovado pelo Diogo (2026-11-25), tal como está, incluindo as recomendações dos pontos 1 a 3 (login próprio `smartparking_workers`; proteção do lugar à letra; ordem dos erros na criação) e as propostas 4 a 15. Implementação por começar, noutra sessão.
+- **Estado:** Aprovado pelo Diogo (2026-11-25), tal como está, incluindo as recomendações dos pontos 1 a 3 (login próprio `smartparking_workers`; proteção do lugar à letra; ordem dos erros na criação) e as propostas 4 a 15. Em implementação no ramo `feat/002-sessoes-pagamentos`.
 - **Requisitos:** UC-02 (reservar, cancelar e estacionar com reserva); RF-02 (atomicidade das transições de reserva, cumprimento na transação da abertura, concorrência por `xmin`); RNF-06 (auditoria só por acréscimo, com o actor `system` no *worker* e os Workers ligados como papel da aplicação)
 - **Ramo:** `feat/002-sessoes-pagamentos`, o mesmo da F3a (último *commit* do plano 002a: `9f41f33`). O PR para a `main` sai no fim desta parte, com o OK do Diogo.
 - **Critérios desta parte:** AC-22 a AC-30. No AC-21, as transições criar, cancelar, abrir com reserva e expirar.
