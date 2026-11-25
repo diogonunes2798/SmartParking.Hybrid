@@ -220,3 +220,50 @@ Formato de cada entrada:
   - A palavra-passe do `db-app-user.sh` passa pelo stdin do `psql` (`\set`, com plicas e barras escapadas; verificado com uma palavra-passe com plicas, barras e `;`) e o `log_statement` fica desligado nessa sessão.
   - O AC-5 conta também as mensagens da *outbox* desse parque, e o teste do nome repetido confirma que não há auditoria nem *outbox* nova.
 - ***Commits:*** `d7ac285` (correções da revisão); registo desta entrada no commit seguinte.
+
+## F2b: zonas, lugares, sensores e tarifários (especificação 001)
+
+- **Data:** 2026-11-25
+- **Feito:**
+  - Plano aprovado pelo Diogo, tal como estava, com os 8 pontos de interpretação da especificação ([`docs/plans/001b-zonas-lugares-sensores-tarifarios.md`](plans/001b-zonas-lugares-sensores-tarifarios.md)), no mesmo ramo da F2a (`feat/001-configuracao`).
+  - Domain: comportamento e eventos de `Zone`, `ParkingSpot`, `Sensor` e `Tariff` (13 eventos `.v1`, todos com `id` e `facilityId`); regras das versões de tarifário (criar fecha a última; só se apaga a última versão futura, e isso reabre a anterior); `Timestamps.Normalize` (UTC, truncado ao microssegundo).
+  - Quatro repositórios por raiz de agregado (`IZoneRepository`, `IParkingSpotRepository`, `ISensorRepository`, `ITariffRepository`), `ExistsAsync` no repositório dos parques e quatro portas de leitura (D10, ADR 0003), registados da mesma forma nos dois modos.
+  - *Endpoints* de zonas, lugares (individualmente e em lote, de 1 a 1 000, tudo ou nada), sensores (com `/{id}/spot`) e versões de tarifário (com `/current`), com ETag e `If-Match`. Sem migrações nem pacotes novos.
+  - [ADR 0005](adr/0005-versoes-de-tarifario-com-vigencia.md) (versões de tarifário com vigência); `tests/http/configuration.http` com um pedido por *endpoint*.
+  - Testes: AC-7, AC-8, AC-9, AC-11, AC-13, AC-14, AC-15, AC-16, os casos de tarifário do AC-17, os de lugares do AC-18 e o AC-23 (este também com um teste que compara as rotas `/api` com os pedidos do `.http`, nos dois sentidos). No fim: 201 testes a passar (131 antes da F2b).
+  - Verificação manual contra o `compose.yaml`, com a Api ligada como `smartparking_api`: os 34 pedidos do percurso do `.http` (incluindo 409, 412, 428 e 404 provocados) deram o código esperado. Na base ficaram 19 pares auditoria/*outbox* (ator `anonymous`, por publicar) para as 19 alterações bem-sucedidas, sem mensagens órfãs; o lote de 2 lugares com 1 sensor deixou 3 pares.
+- **Problemas:**
+  - Na primeira compilação, uma expressão condicional entre `Error` e `List<T>` não convertia para `Result<IReadOnlyList<T>>`: as conversões definidas pelo utilizador não se aplicam a tipos interface. Resolvido com `Result.Success<IReadOnlyList<…>>(…)`.
+  - O Npgsql só grava `timestamptz` com *offset* zero, e o `timestamptz` guarda microssegundos. Um `validFrom` com mais precisão seria gravado diferente do `validTo` da versão que fecha. Primeiro truncou-se no Domain (`188a898`); a revisão mostrou que o *handler* ainda comparava o valor por truncar (achado 2).
+  - Na verificação manual, o *script* de arranque não passava a palavra-passe do Redis, e o `/health/ready` ficou à espera (o Redis exige autenticação). Os *endpoints* de configuração só usam o PostgreSQL, por isso a verificação seguiu sem o Redis; fica a nota para o *script* da F3/F5.
+  - O `TaskStop` voltou a deixar o processo `SmartParking.Api` órfão na porta 5080, como na F1 (o processo filho do `dotnet run` sobrevive). Foi identificado pelo nome e terminado.
+  - O `hooks/post-test-analyze.sh` referido em `.claude/rules/hooks.md` não existe no repositório; os testes correram sem ele.
+  - Nenhuma abordagem falhou duas vezes; não foi preciso voltar a planear.
+- **Decisões:**
+  - Os 8 pontos do plano 001b (Diogo, 2026-11-25): o AC-7 prevalece sobre «um par por entidade alterada» (o fecho e a reabertura da versão vizinha vão no evento da operação); a corrida na criação de versões dá 409; zona ou lugar de outro parque (ou inexistente) dão 400, e um parque inexistente dá 404; `hardwareId` repetido no lote dá 400; o `validFrom` no passado é verificado no *handler*; as operações sem efeito dão 200 sem auditoria; o lote responde 201 sem `Location`; as versões em vigor dos testes são inseridas por SQL.
+  - Desvio ao plano: os testes ficaram agrupados por recurso (`ZoneTests`, `SpotTests`, `SpotBatchTests`, `SensorTests`, `TariffTests`, `TariffAtomicityTests`) e não por operação; os nomes dos métodos seguem o mapa AC → teste do plano.
+  - Os validadores ficaram na Api, sobre os DTO, como nos parques. O sensor ambiental com lugar é recusado no validador e também no *handler*.
+  - `EnumRules` (Api/Common): os enums aceitam só o nome exato, como o `status` dos parques; o `Enum.Parse` dos *endpoints* só corre depois disso.
+  - A listagem de lugares usa duas validações encadeadas no mesmo *endpoint* (`PageRequest` e `SpotFilterRequest`), em vez de um DTO único que repetisse as regras de paginação.
+- ***Commits:*** `fb1901c` (plano), `9c959f5` (início), `5b1b830` (Domain), `43a4ad8` (repositórios e leitores), `8943da2` (zonas), `5fdc459` (lugares e lote), `330eed2` (sensores), `b66bd11` (tarifários), `188a898` (truncatura do `validFrom`), `c9efd71` (`.http` e AC-23), `28ef7d0` (ADR 0005), `9a593c6` (correções da revisão).
+
+## F2b: verificação e revisão independente
+
+- **Data:** 2026-11-25
+- **Feito:**
+  - Build com `-warnaserror` (0 avisos), `dotnet format` sem alterações e `dotnet test`: 201 testes a passar.
+  - `get_diagnostics`: 0. `get_project_graph`: dependências só para dentro. `get_di_registrations`: as 8 portas novas registadas, sem duplicados nem dependências cativas. `detect_antipatterns`: só avisos de código gerado em `obj/` e falsos positivos AP010 (o *tracking* dos repositórios de escrita é intencional; o `AnyAsync` não faz *tracking*).
+  - Testes de mutação: sem o fecho da versão anterior no Domain, o AC-7 falha (e o AC-9 e a corrida também, pelo `EXCLUDE`); sem um pedido no `.http`, o teste do AC-23 falha e nomeia a rota. Os ficheiros foram repostos a partir de cópias.
+  - Revisão independente do diff (subagente `code-reviewer`, só leitura): nenhum defeito na atomicidade da auditoria e da *outbox*, no `xmin`, nos *payloads* dos eventos nem nas operações sem efeito; 6 achados, tratados com o acordo do Diogo.
+- **Problemas (achados da revisão):**
+  1. O validador do lote rebentava (500) com `spots` em falta, nulo ou com um item nulo, porque as regras continuavam depois da primeira falha.
+  2. O *handler* dos tarifários comparava o `validFrom` por truncar e o Domain o truncado: um início menos de 1 µs depois da última versão (ou igual, sem versão anterior) chegava à guarda do Domain (500).
+  3. O `InstalledAt` dos sensores não era truncado ao microssegundo: o evento e a auditoria diferiam da linha gravada.
+  4. Um `If-Match` malformado num recurso inexistente dá 412 e não 404 (herdado da F2a).
+  5. Quando um lugar muda de zona, o sensor desse lugar mantém a zona antiga; essa zona não se apaga enquanto o sensor a referir.
+  6. O teste de concorrência dos tarifários podia passar sem chegar a haver corrida.
+- **Decisões (Diogo, 2026-11-25):**
+  - Corrigidos 1, 2, 3 e 6, cada um com teste novo. Os 5 testes novos falham no código anterior e passam com a correção (verificado). `Timestamps.Normalize` no Domain é usado pelo `Tariff`, pelo `Sensor` e pelo *handler*. O teste de corrida usa o mesmo início em 4 pedidos e exige exatamente um 201, com e sem versão anterior.
+  - O achado 4 fica como na F2a (o RFC 9110 permite o 412).
+  - O achado 5 fica documentado, sem mudar o comportamento: a zona do sensor é configuração própria (`PUT /sensors/{id}`) e não segue o lugar. Revê-se na F5, quando os contadores por zona precisarem dela.
+- ***Commits:*** `9a593c6` (correções da revisão); registo desta entrada no commit seguinte.

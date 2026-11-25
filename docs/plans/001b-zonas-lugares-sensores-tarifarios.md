@@ -1,7 +1,7 @@
 # Plano 001b — Zonas, lugares, sensores e tarifários (F2b)
 
 - **Especificação:** [001-configuracao](../specs/001-configuracao.md) (aprovada a 2026-11-24), secção «Implementação em duas partes»
-- **Estado:** Aprovado pelo Diogo (2026-11-25), tal como está, incluindo as propostas dos pontos 1 a 8
+- **Estado:** Aprovado pelo Diogo (2026-11-25), tal como está, incluindo as propostas dos pontos 1 a 8. Implementado no ramo `feat/001-configuracao` (2026-11-25): 201 testes a passar, verificação, testes de mutação e revisão independente feitos (ver [diário](../DIARIO.md), F2b). Desvio: os testes ficaram agrupados por recurso e não por operação; os nomes dos métodos seguem o mapa abaixo.
 - **Requisitos:** RF-06 (zonas, lugares, sensores e tarifários); RNF-06 (auditoria só por acréscimo, já garantida na F2a); preparação de UC-02 (tarifário vigente) e UC-05 (registo dos sensores)
 - **Ramo:** `feat/001-configuracao`, a continuar a partir de `3cd29ec`. Um PR para a `main` no fim da F2b, com F2a e F2b
 - **Critérios desta parte:** AC-7, AC-8, AC-9, AC-11, AC-13, AC-14, AC-15, AC-16 e AC-23, mais os casos de tarifário do AC-17 e os de lugares do AC-18
