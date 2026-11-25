@@ -9,3 +9,4 @@
 | 0001 | [Infraestrutura local de desenvolvimento](0001-infraestrutura-local.md) | — | RF-04, RNF-03 | 5.9.1 | Proposto | 2026-11-24 |
 | 0002 | [Clean Architecture e estrutura da solução](0002-clean-architecture-e-estrutura.md) | — (E1; pontos de extensão D2, D10) | transversal (OE6) | 5.9.1 | Proposto | 2026-11-24 |
 | 0003 | [Repository por raiz de agregado sobre o EF Core](0003-repository-por-raiz-de-agregado.md) | D10 | RF-02 | 5.4.2, 5.7 | Aceite | 2026-11-24 |
+| 0004 | [Papel da aplicação e auditoria só por acréscimo](0004-papel-da-aplicacao-e-auditoria.md) | D2 (valor por omissão) | RNF-06, RF-06 | 5.4.1, 5.6.2, 5.9.2 | Aceite | 2026-11-25 |
