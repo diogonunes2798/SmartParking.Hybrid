@@ -57,6 +57,8 @@ internal static class RelationalRegistration
         services.AddScoped<IUserReader, UserReader>();
         services.AddScoped<IParkingSessionRepository, ParkingSessionRepository>();
         services.AddScoped<ISessionReader, SessionReader>();
+        services.AddScoped<IReservationRepository, ReservationRepository>();
+        services.AddScoped<IReservationReader, ReservationReader>();
 
         healthChecks.AddNpgSql(
             sp => sp.GetRequiredService<NpgsqlDataSource>(),
