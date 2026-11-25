@@ -68,9 +68,8 @@ public sealed class Tariff : AggregateRoot
         string currency,
         DateTimeOffset now)
     {
-        // timestamptz keeps microseconds: truncate here so the closed version's ValidTo equals the stored ValidFrom.
-        var utc = validFrom.ToUniversalTime();
-        var start = utc.AddTicks(-(utc.Ticks % 10));
+        // timestamptz keeps microseconds: normalise so the closed version's ValidTo equals the stored ValidFrom.
+        var start = Timestamps.Normalize(validFrom);
         ArgumentOutOfRangeException.ThrowIfLessThan(start, now, nameof(validFrom));
 
         if (latest is not null)

@@ -158,6 +158,27 @@ public sealed class SpotBatchTests(ApiFixture fixture)
         Assert.True(problem.RootElement.GetProperty("errors").TryGetProperty("spots[1].zoneId", out _));
     }
 
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("""{"spots":null}""")]
+    [InlineData("""{"spots":[null]}""")]
+    public async Task Batch_MissingOrNullSpots_Returns400(string body)
+    {
+        // Arrange
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = fixture.Hybrid.CreateClient();
+        var (facility, _) = await ConfigurationApi.CreateFacilityWithZoneAsync(client, cancellationToken);
+        using var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
+
+        // Act
+        using var response = await client.PostAsync(new Uri($"{ConfigurationApi.Spots(facility.Id)}/batch", UriKind.Relative), content, cancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+        Assert.True(problem.RootElement.GetProperty("errors").TryGetProperty("spots", out _));
+    }
+
     private Task<long> CountAsync(string sql, Guid facilityId, CancellationToken cancellationToken) =>
         DbProbe.ScalarAsync<long>(Owner, sql, cancellationToken, facilityId);
 }

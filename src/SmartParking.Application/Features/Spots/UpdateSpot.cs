@@ -10,6 +10,8 @@ namespace SmartParking.Application.Features.Spots;
 /// Replaces a spot's zone, code, type and status (PUT). Needs the version the client read (428/412). The zone can
 /// change only within the facility: another facility's zone is 400 (AC-16). <c>SpotUpdated.v1</c> carries the previous zone.
 /// A request that changes nothing writes nothing and keeps the ETag.
+/// The zone of a sensor on this spot is the sensor's own configuration and does not follow the spot (Diogo, 2026-11-25;
+/// review of F2b, finding 5): while it still names the old zone, that zone cannot be deleted (FK, 409).
 /// </summary>
 public static class UpdateSpot
 {

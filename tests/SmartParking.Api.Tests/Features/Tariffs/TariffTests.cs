@@ -149,19 +149,30 @@ public sealed class TariffTests(ApiFixture fixture)
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
-    [Fact]
-    public async Task Create_ConcurrentVersions_OneSucceedsOthersReturn409()
+    /// <summary>
+    /// Plan 001b, point 2. With the same start, whatever the interleaving, exactly one request wins: the others meet
+    /// the rule «after the latest» (sequential), the latest version's xmin (412 turned into 409) or, without a previous
+    /// version, the EXCLUDE constraint. None of them may surface as 412 or 500.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Create_ConcurrentSameStart_ExactlyOneCreatedOthers409(bool withCurrentVersion)
     {
         // Arrange
         var cancellationToken = TestContext.Current.CancellationToken;
         using var client = fixture.Hybrid.CreateClient();
         var (facility, _) = await FacilityApi.CreateAsync(client, cancellationToken);
-        await ConfigurationApi.SeedCurrentTariffAsync(Owner, facility.Id, cancellationToken);
-        var start = DateTimeOffset.UtcNow.AddDays(1);
+        if (withCurrentVersion)
+        {
+            await ConfigurationApi.SeedCurrentTariffAsync(Owner, facility.Id, cancellationToken);
+        }
+
+        var request = ConfigurationApi.NewTariff(DateTimeOffset.UtcNow.AddDays(1));
 
         // Act
-        var responses = await Task.WhenAll(Enumerable.Range(1, 4).Select(i =>
-            client.PostAsJsonAsync(ConfigurationApi.Tariffs(facility.Id), ConfigurationApi.NewTariff(start.AddMinutes(i)), cancellationToken)));
+        var responses = await Task.WhenAll(Enumerable.Range(1, 4).Select(_ =>
+            client.PostAsJsonAsync(ConfigurationApi.Tariffs(facility.Id), request, cancellationToken)));
 
         // Assert
         var codes = responses.Select(response => response.StatusCode).ToList();
@@ -170,11 +181,29 @@ public sealed class TariffTests(ApiFixture fixture)
             response.Dispose();
         }
 
-        Assert.Contains(HttpStatusCode.Created, codes);
-        Assert.All(codes, code => Assert.Contains(code, new[] { HttpStatusCode.Created, HttpStatusCode.Conflict }));
+        Assert.Single(codes, code => code == HttpStatusCode.Created);
+        Assert.Equal(3, codes.Count(code => code == HttpStatusCode.Conflict));
         var open = await DbProbe.ScalarAsync<long>(
             Owner, "SELECT count(*) FROM tariffs WHERE facility_id = $1 AND valid_to IS NULL", cancellationToken, facility.Id);
         Assert.Equal(1, open);
+    }
+
+    [Fact]
+    public async Task Create_StartHalfMicrosecondAfterLatest_Returns409()
+    {
+        // Arrange
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = fixture.Hybrid.CreateClient();
+        var (facility, _) = await FacilityApi.CreateAsync(client, cancellationToken);
+        var start = new DateTimeOffset(DateTimeOffset.UtcNow.AddDays(2).Date, TimeSpan.Zero);
+        await ConfigurationApi.PostAsync<TariffResponse>(client, ConfigurationApi.Tariffs(facility.Id), ConfigurationApi.NewTariff(start), cancellationToken);
+
+        // Act
+        using var response = await client.PostAsJsonAsync(
+            ConfigurationApi.Tariffs(facility.Id), ConfigurationApi.NewTariff(start.AddTicks(5)), cancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
     [Theory]

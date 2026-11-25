@@ -3,6 +3,7 @@ using SmartParking.Application.Abstractions.Messaging;
 using SmartParking.Application.Abstractions.Persistence;
 using SmartParking.Application.Abstractions.Reading;
 using SmartParking.Application.Features.Facilities;
+using SmartParking.Domain.Common;
 using SmartParking.Domain.Facilities;
 
 namespace SmartParking.Application.Features.Tariffs;
@@ -39,20 +40,22 @@ public static class CreateTariffVersion
                 return FacilityErrors.NotFound(command.FacilityId);
             }
 
+            // Check the instant the Domain will store (UTC, whole microseconds), so both checks agree.
             var now = clock.GetUtcNow();
-            if (command.ValidFrom < now)
+            var validFrom = Timestamps.Normalize(command.ValidFrom);
+            if (validFrom < now)
             {
                 return TariffErrors.StartsInThePast;
             }
 
             var latest = await tariffs.GetLatestAsync(command.FacilityId, cancellationToken);
-            if (latest is not null && command.ValidFrom <= latest.ValidFrom)
+            if (latest is not null && validFrom <= latest.ValidFrom)
             {
                 return TariffErrors.NotAfterLatest;
             }
 
             var version = Tariff.CreateVersion(
-                Guid.CreateVersion7(now), command.FacilityId, latest, command.ValidFrom, command.PricePerHour,
+                Guid.CreateVersion7(now), command.FacilityId, latest, validFrom, command.PricePerHour,
                 command.BillingIncrementMinutes, command.DailyMaximum, command.FreeMinutes, command.Currency, now);
             tariffs.Add(version);
 

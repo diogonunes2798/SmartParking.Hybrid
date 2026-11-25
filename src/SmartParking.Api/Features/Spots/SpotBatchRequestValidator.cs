@@ -8,13 +8,16 @@ namespace SmartParking.Api.Features.Spots;
 /// <summary>
 /// AC-15: 1 to 1 000 spots; codes and hardware ids unique within the request (plan 001b, point 4). Checked before
 /// the database is touched; conflicts with existing rows are left to the unique indexes (409, nothing created).
+/// The list rules stop at the first failure, so a missing list or a null item is a 400 and never reaches the later rules.
 /// </summary>
 internal sealed class SpotBatchRequestValidator : AbstractValidator<SpotBatchRequest>
 {
     public SpotBatchRequestValidator()
     {
         RuleFor(request => request.Spots)
+            .Cascade(CascadeMode.Stop)
             .NotNull()
+            .Must(spots => spots!.All(spot => spot is not null)).WithMessage("A batch cannot contain null spots.")
             .Must(spots => spots!.Count is >= 1 and <= CreateSpotBatch.MaxItems)
             .WithMessage($"A batch has between 1 and {CreateSpotBatch.MaxItems} spots.")
             .Must(HaveDistinctCodes).WithMessage("Each code can appear only once in the batch.")
@@ -41,18 +44,18 @@ internal sealed class SpotBatchRequestValidator : AbstractValidator<SpotBatchReq
                     .When(entry => entry.Sensor is not null);
             })
             .OverridePropertyName("spots")
-            .When(request => request.Spots is { Count: <= CreateSpotBatch.MaxItems });
+            .When(request => request.Spots is { Count: <= CreateSpotBatch.MaxItems } spots && spots.All(spot => spot is not null));
     }
 
     private static bool HaveDistinctCodes(IReadOnlyList<SpotBatchItemRequest>? spots)
     {
-        var codes = spots!.Where(spot => spot.Code is not null).Select(spot => spot.Code!.Trim()).ToList();
+        var codes = (spots ?? []).Where(spot => spot?.Code is not null).Select(spot => spot.Code!.Trim()).ToList();
         return codes.Distinct(StringComparer.Ordinal).Count() == codes.Count;
     }
 
     private static bool HaveDistinctHardwareIds(IReadOnlyList<SpotBatchItemRequest>? spots)
     {
-        var ids = spots!.Where(spot => spot.Sensor?.HardwareId is not null).Select(spot => spot.Sensor!.HardwareId!.Trim()).ToList();
+        var ids = (spots ?? []).Where(spot => spot?.Sensor?.HardwareId is not null).Select(spot => spot.Sensor!.HardwareId!.Trim()).ToList();
         return ids.Distinct(StringComparer.Ordinal).Count() == ids.Count;
     }
 }

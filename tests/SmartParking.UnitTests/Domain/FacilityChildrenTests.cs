@@ -166,6 +166,19 @@ public sealed class FacilityChildrenTests
         Assert.Equal(9, sensor.InstalledAt.Hour);
     }
 
+    [Fact]
+    public void Sensor_InstalledAtWithSubMicroseconds_IsTruncatedLikeTheDatabase()
+    {
+        // Act
+        var sensor = Sensor.Create(
+            Guid.CreateVersion7(), FacilityId, "HW-US", SensorKind.Occupancy, "OccuSense",
+            DateTimeOffset.UnixEpoch.AddTicks(17), null, null);
+
+        // Assert
+        Assert.Equal(DateTimeOffset.UnixEpoch.AddTicks(10), sensor.InstalledAt);
+        Assert.Equal(sensor.InstalledAt, Assert.IsType<SensorRegistered>(Assert.Single(sensor.DomainEvents)).InstalledAt);
+    }
+
     private static Sensor NewOccupancySensor(Guid? spotId)
     {
         var sensor = Sensor.Create(

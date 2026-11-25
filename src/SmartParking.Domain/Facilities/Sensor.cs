@@ -58,7 +58,7 @@ public sealed class Sensor : AggregateRoot
             HardwareId = Guard.Text(hardwareId, HardwareIdMaxLength),
             Kind = Guard.Defined(kind),
             Model = Guard.Text(model, ModelMaxLength),
-            InstalledAt = installedAt.ToUniversalTime(),
+            InstalledAt = Timestamps.Normalize(installedAt),
             Status = SensorStatus.Active,
             SpotId = spotId is { } spot ? Guard.Id(spot) : null,
             ZoneId = zoneId is { } zone ? Guard.Id(zone) : null,
