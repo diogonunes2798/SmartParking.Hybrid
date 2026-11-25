@@ -25,6 +25,15 @@ internal sealed class ParkingSessionConfiguration : IEntityTypeConfiguration<Par
         builder.HasOne<ParkingSpot>().WithMany().HasForeignKey(session => session.SpotId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Vehicle>().WithMany().HasForeignKey(session => session.VehicleId).OnDelete(DeleteBehavior.Restrict);
 
+        // The FK index of the Initial migration, declared explicitly so the named index below cannot replace it
+        // (the OpenSessionPerVehicle migration only adds; spec 002, AC-1).
+        builder.HasIndex(session => session.VehicleId);
+
+        // At most one open session per vehicle (spec 002, AC-7). No uniqueness per spot.
+        builder.HasIndex(session => session.VehicleId, "ux_parking_sessions_vehicle_open")
+            .IsUnique()
+            .HasFilter("status = 'Open'");
+
         // A tariff version referenced by sessions can never be deleted (spec 001, AC-19).
         builder.HasOne<Tariff>().WithMany().HasForeignKey(session => session.TariffId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Reservation>()

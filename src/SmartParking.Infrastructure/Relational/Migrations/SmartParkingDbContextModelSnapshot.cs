@@ -424,6 +424,11 @@ namespace SmartParking.Infrastructure.Relational.Migrations
                     b.HasIndex("VehicleId")
                         .HasDatabaseName("ix_parking_sessions_vehicle_id");
 
+                    b.HasIndex(new[] { "VehicleId" }, "ux_parking_sessions_vehicle_open")
+                        .IsUnique()
+                        .HasDatabaseName("ux_parking_sessions_vehicle_open")
+                        .HasFilter("status = 'Open'");
+
                     b.ToTable("parking_sessions", null, t =>
                         {
                             t.HasCheckConstraint("ck_parking_sessions_amount", "amount IS NULL OR amount >= 0");
