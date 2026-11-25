@@ -1,0 +1,56 @@
+### Configuração (RF-06, especificação 001)
+# Um pedido por endpoint de «API Contract». A F2a cobre os parques; a F2b acrescenta zonas,
+# lugares, lote, tarifários e sensores.
+# Pré-requisitos: docker compose up -d --wait; migrações como dono; scripts/db-app-user.sh;
+# Api a correr com o login da aplicação (ver docs/DIARIO.md, F2a).
+
+@baseUrl = http://localhost:5080
+# Operador de referência criado pela migração Initial (HasData).
+@operatorId = 0193a1b0-0000-7000-8000-000000000001
+
+### Criar um parque (201 + Location + ETag)
+# @name createFacility
+POST {{baseUrl}}/api/facilities
+Content-Type: application/json
+
+{
+  "operatorId": "{{operatorId}}",
+  "name": "Parque Central",
+  "address": "Rua da Sofia 1, Coimbra",
+  "latitude": 40.2033,
+  "longitude": -8.4103,
+  "timeZone": "Europe/Lisbon",
+  "openingHours": [
+    { "dayOfWeek": 1, "opensAt": "08:00:00", "closesAt": "20:00:00" },
+    { "dayOfWeek": 6, "opensAt": "09:00:00", "closesAt": "13:00:00" }
+  ]
+}
+
+### Listar parques (paginado: page ≥ 1, pageSize 1–100)
+GET {{baseUrl}}/api/facilities?page=1&pageSize=20
+
+### Obter um parque (200 + ETag)
+# @name getFacility
+GET {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}
+
+### Alterar um parque (If-Match obrigatório: 428 sem ele, 412 desatualizado)
+# @name updateFacility
+PUT {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}
+Content-Type: application/json
+If-Match: {{getFacility.response.headers.ETag}}
+
+{
+  "name": "Parque Central",
+  "address": "Rua da Sofia 1, Coimbra",
+  "latitude": 40.2033,
+  "longitude": -8.4103,
+  "timeZone": "Europe/Lisbon",
+  "status": "Inactive",
+  "openingHours": [
+    { "dayOfWeek": 1, "opensAt": "07:30:00", "closesAt": "21:00:00" }
+  ]
+}
+
+### Apagar um parque (204; 409 se tiver zonas, lugares, sensores ou tarifários)
+DELETE {{baseUrl}}/api/facilities/{{createFacility.response.body.id}}
+If-Match: {{updateFacility.response.headers.ETag}}
