@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using SmartParking.Application.Abstractions;
 using SmartParking.Infrastructure.Cache;
 using SmartParking.Infrastructure.Documents;
@@ -30,6 +31,13 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(PersistenceOptions.SectionName))
             .Validate(options => PersistenceOptions.TryParseMode(options.Mode, out _), PersistenceOptions.ValidationMessage)
             .ValidateOnStart();
+
+        // Shared by both modes: the reservation rules, handed to the Application as a Domain policy (plan 002b, 5).
+        services.AddOptions<ReservationOptions>()
+            .Bind(configuration.GetSection(ReservationOptions.SectionName))
+            .Validate(options => options.IsValid(), ReservationOptions.ValidationMessage)
+            .ValidateOnStart();
+        services.TryAddSingleton(provider => provider.GetRequiredService<IOptions<ReservationOptions>>().Value.ToPolicy());
 
         if (!PersistenceOptions.TryParseMode(configuration[PersistenceOptions.ModeKey], out var mode))
         {
