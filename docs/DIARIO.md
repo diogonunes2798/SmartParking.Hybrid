@@ -280,5 +280,5 @@ Formato de cada entrada:
   - O repositório continua sem integração contínua, por isso o PR não teve verificações automáticas: a garantia são os resultados locais (201 testes, build e format limpos) registados na descrição.
 - **Decisões:**
   - *Merge commit* em vez de *squash*: os *commits* da F2a e da F2b referidos neste diário continuam a existir na `main`.
-  - O ramo `feat/001-configuracao` não foi apagado (no `origin` nem localmente); fica para o Diogo decidir.
+  - O ramo `feat/001-configuracao` foi apagado no `origin` e localmente, a pedido do Diogo, depois de se confirmar que estava integrado na `main` (`git merge-base --is-ancestor`), como na F1. A cópia de trabalho principal passou para a `main`.
 - ***Commits:*** `f123c86` (*merge* do PR #2); registo desta entrada no commit seguinte.
