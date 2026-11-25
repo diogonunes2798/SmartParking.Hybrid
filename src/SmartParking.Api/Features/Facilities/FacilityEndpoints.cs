@@ -11,6 +11,8 @@ namespace SmartParking.Api.Features.Facilities;
 /// <summary>
 /// Parking facility configuration (RF-06, spec 001). Reads carry the <c>xmin</c> as a strong ETag; PUT and DELETE
 /// need it in <c>If-Match</c> (428 without it, 412 when stale). Anonymous on purpose until F11 (RBAC).
+/// An <c>If-Match</c> that is not one strong ETag of ours (<c>*</c>, a list, a weak tag) is answered with 412 before
+/// the handler runs, even for an id that does not exist; RFC 9110 allows 412 for any failed precondition.
 /// </summary>
 internal sealed class FacilityEndpoints : IEndpointGroup
 {

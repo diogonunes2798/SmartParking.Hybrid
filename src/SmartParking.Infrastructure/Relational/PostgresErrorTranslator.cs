@@ -8,14 +8,11 @@ namespace SmartParking.Infrastructure.Relational;
 /// <summary>
 /// Turns constraint violations into <see cref="Error"/> values, so Application stays free of EF Core (spec 001):
 /// <c>23505</c>, <c>23503</c> and <c>23P01</c> → Conflict (409); <c>23514</c> → Validation (400).
+/// A stale <c>xmin</c> is answered with <c>ConcurrencyCheck.StaleVersion</c>, the same 412 as the handlers' check.
 /// Messages name the constraint and table only: the server's DETAIL (which carries row values) is never copied.
 /// </summary>
 internal static class PostgresErrorTranslator
 {
-    public static Error StaleVersion { get; } = Error.PreconditionFailed(
-        "Database.StaleVersion",
-        "The resource was changed by another request. Read it again and retry with the new ETag.");
-
     public static bool TryTranslate(DbUpdateException exception, [NotNullWhen(true)] out Error? error)
     {
         ArgumentNullException.ThrowIfNull(exception);

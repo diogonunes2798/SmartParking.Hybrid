@@ -63,10 +63,14 @@ internal sealed class SmartParkingDbContext(
         }
         catch (DbUpdateConcurrencyException)
         {
-            return PostgresErrorTranslator.StaleVersion;
+            // The transaction was rolled back; drop the pending changes and the appended audit/outbox rows,
+            // so a later save in the same scope cannot write them as orphans.
+            ChangeTracker.Clear();
+            return ConcurrencyCheck.StaleVersion;
         }
         catch (DbUpdateException exception) when (PostgresErrorTranslator.TryTranslate(exception, out var error))
         {
+            ChangeTracker.Clear();
             return error;
         }
     }
@@ -111,6 +115,14 @@ internal sealed class SmartParkingDbContext(
 
         foreach (var entry in ChangeTracker.Entries<AggregateRoot>().ToList())
         {
+            // A change confined to owned rows in their own table (for example, only the opening hours) leaves the
+            // root Unchanged: EF Core would neither check nor bump its xmin, so a stale ETag could overwrite it and
+            // the ETag would not change. Touching the root makes the UPDATE ... WHERE xmin = @original run.
+            if (entry.State == EntityState.Unchanged && entry.Entity.DomainEvents.Count > 0)
+            {
+                entry.State = EntityState.Modified;
+            }
+
             foreach (var domainEvent in entry.Entity.DequeueDomainEvents())
             {
                 var message = new OutboxMessage

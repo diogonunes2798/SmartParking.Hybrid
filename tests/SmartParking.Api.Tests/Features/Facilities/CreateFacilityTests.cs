@@ -78,7 +78,13 @@ public sealed class CreateFacilityTests(ApiFixture fixture)
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var facilities = await DbProbe.ScalarAsync<long>(
             Owner, "SELECT count(*) FROM parking_facilities WHERE name = $1", cancellationToken, first.Name);
+        var audits = await DbProbe.ScalarAsync<long>(
+            Owner, "SELECT count(*) FROM audit_entries WHERE after->>'name' = $1", cancellationToken, first.Name);
+        var messages = await DbProbe.ScalarAsync<long>(
+            Owner, "SELECT count(*) FROM outbox_messages WHERE payload->>'name' = $1", cancellationToken, first.Name);
         Assert.Equal(1, facilities);
+        Assert.Equal(1, audits);
+        Assert.Equal(1, messages);
     }
 
     [Fact]

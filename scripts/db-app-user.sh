@@ -29,11 +29,18 @@ set +a
 : "${POSTGRES_DB:?defina POSTGRES_DB no .env}"
 : "${POSTGRES_APP_PASSWORD:?defina POSTGRES_APP_PASSWORD no .env (ver .env.example)}"
 
-# A palavra-passe entra como variável do psql e é citada com format('%L'), nunca por interpolação da shell.
-# O \gexec executa o comando gerado sem o mostrar.
-docker compose exec -T postgres \
-    psql --quiet --no-psqlrc -v ON_ERROR_STOP=1 -v app_password="$POSTGRES_APP_PASSWORD" \
-    -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<'SQL'
+# A palavra-passe segue pelo stdin do psql (nunca na linha de comandos, visível no ps): uma linha
+# \set com o valor entre plicas, com \ e ' escapados, e depois format('%L') no SQL. O \gexec executa o
+# comando gerado sem o mostrar, e o log_statement fica desligado nesta sessão para o ALTER ROLE não ir
+# para o registo do servidor (o dono do compose é superutilizador e pode fazê-lo).
+escaped=${POSTGRES_APP_PASSWORD//\\/\\\\}
+escaped=${escaped//\'/\'\'}
+
+{
+    printf "\\\\set app_password '%s'\n" "$escaped"
+    cat <<'SQL'
+SET log_statement = 'none';
+
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'smartparking_app') THEN
@@ -51,6 +58,7 @@ SELECT format('ALTER ROLE smartparking_api WITH LOGIN NOSUPERUSER NOCREATEDB NOC
 
 GRANT smartparking_app TO smartparking_api;
 SQL
+} | docker compose exec -T postgres psql --quiet --no-psqlrc -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 
 echo "Login smartparking_api pronto (membro de smartparking_app)."
 echo "Api: ConnectionStrings__Postgres=\"Host=localhost;Port=${POSTGRES_PORT:-5432};Database=${POSTGRES_DB};Username=smartparking_api;Password=…\""

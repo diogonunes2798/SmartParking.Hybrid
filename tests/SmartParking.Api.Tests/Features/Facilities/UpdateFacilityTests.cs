@@ -1,4 +1,5 @@
 using System.Net;
+using SmartParking.Api.Features.Facilities;
 using SmartParking.Api.Tests.Fixtures;
 
 namespace SmartParking.Api.Tests.Features.Facilities;
@@ -71,6 +72,34 @@ public sealed class UpdateFacilityTests(ApiFixture fixture)
         Assert.Equal(
             ["Created|FacilityCreated.v1", "Updated|FacilityUpdated.v1"],
             await FacilityApi.AuditTrailAsync(Owner, facility.Id, cancellationToken));
+    }
+
+    [Fact]
+    public async Task Put_OnlyOpeningHoursChanged_Returns200WithNewETagAndOldETagIsStale_AC12()
+    {
+        // Arrange
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = fixture.Hybrid.CreateClient();
+        var created = FacilityApi.NewRequest();
+        var (facility, etag) = await FacilityApi.CreateAsync(client, cancellationToken, created);
+        var onlyHours = FacilityApi.UpdateOf(created, created.Name!) with
+        {
+            OpeningHours = [new OpeningHoursRequest(1, new TimeOnly(9, 0), new TimeOnly(18, 0))],
+        };
+
+        // Act
+        using var request = FacilityApi.WithIfMatch(HttpMethod.Put, facility.Id, etag, onlyHours);
+        using var response = await client.SendAsync(request, cancellationToken);
+        using var stale = FacilityApi.WithIfMatch(HttpMethod.Put, facility.Id, etag, onlyHours with { OpeningHours = [] });
+        using var staleResponse = await client.SendAsync(stale, cancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotEqual(etag, response.Headers.ETag?.Tag);
+        Assert.Equal(HttpStatusCode.PreconditionFailed, staleResponse.StatusCode);
+        var hours = await DbProbe.ScalarAsync<long>(
+            Owner, "SELECT count(*) FROM facility_opening_hours WHERE facility_id = $1", cancellationToken, facility.Id);
+        Assert.Equal(1, hours);
     }
 
     [Theory]

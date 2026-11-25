@@ -6,6 +6,7 @@ namespace SmartParking.Application.Abstractions.Persistence;
 /// Database constraint violations come back as a failed <see cref="Result"/> (spec 001):
 /// unique, foreign key and exclusion violations as <see cref="ErrorType.Conflict"/>, check violations
 /// as <see cref="ErrorType.Validation"/>, and a stale concurrency token as <see cref="ErrorType.PreconditionFailed"/>.
+/// After a failed save the pending changes are discarded: load the aggregates again before retrying.
 /// </summary>
 public interface IUnitOfWork
 {

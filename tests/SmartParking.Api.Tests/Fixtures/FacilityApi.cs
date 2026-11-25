@@ -47,6 +47,14 @@ internal static class FacilityApi
         return request;
     }
 
+    /// <summary>Outbox types whose payload names this facility, oldest first (also orphans without an audit entry).</summary>
+    public static Task<List<string>> OutboxTypesAsync(string connectionString, Guid facilityId, CancellationToken cancellationToken) =>
+        DbProbe.ColumnAsync(
+            connectionString,
+            "SELECT type FROM outbox_messages WHERE payload->>'id' = $1 ORDER BY occurred_at, id",
+            cancellationToken,
+            facilityId.ToString());
+
     /// <summary>Audit entries of one entity, oldest first: <c>operation|outboxType</c>.</summary>
     public static Task<List<string>> AuditTrailAsync(string connectionString, Guid entityId, CancellationToken cancellationToken) =>
         DbProbe.ColumnAsync(

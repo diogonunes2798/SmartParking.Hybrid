@@ -38,6 +38,7 @@ public sealed class DeleteFacilityTests(ApiFixture fixture)
         using var stillThere = await client.GetAsync(new Uri($"{FacilityApi.Route}/{facility.Id}", UriKind.Relative), cancellationToken);
         Assert.Equal(HttpStatusCode.OK, stillThere.StatusCode);
         Assert.Equal(["Created|FacilityCreated.v1"], await FacilityApi.AuditTrailAsync(Owner, facility.Id, cancellationToken));
+        Assert.Equal(["FacilityCreated.v1"], await FacilityApi.OutboxTypesAsync(Owner, facility.Id, cancellationToken));
     }
 
     [Fact]
