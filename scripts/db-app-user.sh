@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Cria ou atualiza o login da Api (smartparking_api), membro do grupo smartparking_app
-# (especificação 001, RNF-06). A Api nunca liga como dono das tabelas: assim, a base de dados
-# recusa alterar ou apagar a auditoria e não há DDL.
+# Cria ou atualiza os logins da Api (smartparking_api) e dos Workers (smartparking_workers), membros
+# do grupo smartparking_app (especificação 001, RNF-06; especificação 002, AC-29). Nem a Api nem os
+# Workers ligam como dono das tabelas: assim, a base de dados recusa alterar ou apagar a auditoria e
+# não há DDL. Dois logins distinguem os processos no pg_stat_activity (plano 002b, ponto 1).
 #
 # Pré-requisitos:
 #   docker compose up -d --wait
@@ -28,16 +29,20 @@ set +a
 : "${POSTGRES_USER:?defina POSTGRES_USER no .env}"
 : "${POSTGRES_DB:?defina POSTGRES_DB no .env}"
 : "${POSTGRES_APP_PASSWORD:?defina POSTGRES_APP_PASSWORD no .env (ver .env.example)}"
+: "${POSTGRES_WORKERS_PASSWORD:?defina POSTGRES_WORKERS_PASSWORD no .env (ver .env.example)}"
 
-# A palavra-passe segue pelo stdin do psql (nunca na linha de comandos, visível no ps): uma linha
-# \set com o valor entre plicas, com \ e ' escapados, e depois format('%L') no SQL. O \gexec executa o
+# As palavras-passe seguem pelo stdin do psql (nunca na linha de comandos, visível no ps): uma linha
+# \set por valor, entre plicas, com \ e ' escapados, e depois format('%L') no SQL. O \gexec executa o
 # comando gerado sem o mostrar, e o log_statement fica desligado nesta sessão para o ALTER ROLE não ir
 # para o registo do servidor (o dono do compose é superutilizador e pode fazê-lo).
-escaped=${POSTGRES_APP_PASSWORD//\\/\\\\}
-escaped=${escaped//\'/\'\'}
+quote_for_psql() {
+    local escaped=${1//\\/\\\\}
+    printf '%s' "${escaped//\'/\'\'}"
+}
 
 {
-    printf "\\\\set app_password '%s'\n" "$escaped"
+    printf "\\\\set app_password '%s'\n" "$(quote_for_psql "$POSTGRES_APP_PASSWORD")"
+    printf "\\\\set workers_password '%s'\n" "$(quote_for_psql "$POSTGRES_WORKERS_PASSWORD")"
     cat <<'SQL'
 SET log_statement = 'none';
 
@@ -57,8 +62,18 @@ SELECT format('ALTER ROLE smartparking_api WITH LOGIN NOSUPERUSER NOCREATEDB NOC
 \gexec
 
 GRANT smartparking_app TO smartparking_api;
+
+SELECT format('CREATE ROLE smartparking_workers LOGIN PASSWORD %L', :'workers_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'smartparking_workers')
+\gexec
+
+SELECT format('ALTER ROLE smartparking_workers WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD %L', :'workers_password')
+\gexec
+
+GRANT smartparking_app TO smartparking_workers;
 SQL
 } | docker compose exec -T postgres psql --quiet --no-psqlrc -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 
-echo "Login smartparking_api pronto (membro de smartparking_app)."
+echo "Logins smartparking_api e smartparking_workers prontos (membros de smartparking_app)."
 echo "Api: ConnectionStrings__Postgres=\"Host=localhost;Port=${POSTGRES_PORT:-5432};Database=${POSTGRES_DB};Username=smartparking_api;Password=…\""
+echo "Workers: ConnectionStrings__Postgres=\"Host=localhost;Port=${POSTGRES_PORT:-5432};Database=${POSTGRES_DB};Username=smartparking_workers;Password=…\""

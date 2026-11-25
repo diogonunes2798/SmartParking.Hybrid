@@ -18,8 +18,13 @@ public sealed class DatabaseContainers : IAsyncLifetime
     /// <summary>Login role of the Api, as created by <c>scripts/db-app-user.sh</c> in development.</summary>
     public const string AppLogin = "smartparking_api";
 
+    /// <summary>Login role of the Workers, also a member of <c>smartparking_app</c> (spec 002, AC-29; plan 002b, point 1).</summary>
+    public const string WorkersLogin = "smartparking_workers";
+
     // Hex only, so it can be written into CREATE ROLE without quoting issues; new for every run.
     private readonly string appPassword = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+
+    private readonly string workersPassword = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
 
     public PostgreSqlContainer Postgres { get; } = new PostgreSqlBuilder(ContainerImages.Postgres).Build();
 
@@ -32,6 +37,9 @@ public sealed class DatabaseContainers : IAsyncLifetime
 
     /// <summary>The application login: what the hosts under test use.</summary>
     public string AppConnectionString => WithLogin(OwnerConnectionString, AppLogin, appPassword);
+
+    /// <summary>The Workers login: what the Workers hosts under test use.</summary>
+    public string WorkersConnectionString => WithLogin(OwnerConnectionString, WorkersLogin, workersPassword);
 
     public async ValueTask InitializeAsync()
     {
@@ -49,11 +57,14 @@ public sealed class DatabaseContainers : IAsyncLifetime
         await Redis.DisposeAsync();
     }
 
-    /// <summary>Host settings that point every sublayer at these containers; PostgreSQL through the application login.</summary>
-    public Dictionary<string, string?> Settings(PersistenceMode mode) => new()
+    /// <summary>
+    /// Host settings that point every sublayer at these containers; PostgreSQL through an application login
+    /// (<see cref="AppLogin"/> unless <paramref name="login"/> is <see cref="WorkersLogin"/>).
+    /// </summary>
+    public Dictionary<string, string?> Settings(PersistenceMode mode, string login = AppLogin) => new()
     {
         [PersistenceOptions.ModeKey] = mode.ToString(),
-        ["ConnectionStrings:Postgres"] = AppConnectionString,
+        ["ConnectionStrings:Postgres"] = login == WorkersLogin ? WorkersConnectionString : AppConnectionString,
         ["ConnectionStrings:Mongo"] = Mongo.GetConnectionString(),
         ["ConnectionStrings:Redis"] = Redis.GetConnectionString(),
         [HealthCheckTags.TimeoutKey] = "00:00:05",
@@ -105,9 +116,12 @@ public sealed class DatabaseContainers : IAsyncLifetime
         await connection.OpenAsync(cancellationToken);
 
         // Role names and passwords cannot be parameters; both are constants or hex generated above.
-        await using var command = new NpgsqlCommand(
-            $"CREATE ROLE {AppLogin} LOGIN PASSWORD '{appPassword}' IN ROLE {RelationalDatabase.ApplicationRole}",
-            connection);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        foreach (var (login, password) in new[] { (AppLogin, appPassword), (WorkersLogin, workersPassword) })
+        {
+            await using var command = new NpgsqlCommand(
+                $"CREATE ROLE {login} LOGIN PASSWORD '{password}' IN ROLE {RelationalDatabase.ApplicationRole}",
+                connection);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
     }
 }

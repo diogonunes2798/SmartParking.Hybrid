@@ -6,14 +6,18 @@ namespace SmartParking.Tests.Common;
 internal static class StartupAssertions
 {
     /// <summary>Starting the host must fail with an options validation error that names Persistence:Mode.</summary>
-    public static void AssertStartupFailsOnPersistenceMode(Action startHost)
+    public static void AssertStartupFailsOnPersistenceMode(Action startHost) =>
+        AssertStartupFailsNaming(startHost, PersistenceOptions.ModeKey);
+
+    /// <summary>Starting the host must fail with an options validation error that names <paramref name="key"/>.</summary>
+    public static void AssertStartupFailsNaming(Action startHost, string key)
     {
         var exception = Record.Exception(startHost);
 
         Assert.NotNull(exception);
         var validation = Unwrap(exception).OfType<OptionsValidationException>().FirstOrDefault();
         Assert.NotNull(validation);
-        Assert.Contains(PersistenceOptions.ModeKey, validation.Message, StringComparison.Ordinal);
+        Assert.Contains(key, validation.Message, StringComparison.Ordinal);
     }
 
     private static IEnumerable<Exception> Unwrap(Exception exception)
