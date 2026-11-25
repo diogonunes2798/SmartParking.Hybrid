@@ -17,7 +17,7 @@ public sealed partial class HttpFileTests(ApiFixture fixture)
     private static readonly Dictionary<string, string[]> Files = new(StringComparer.Ordinal)
     {
         ["configuration.http"] = ["/api/facilities", "/api/sensors"],
-        ["sessions.http"] = ["/api/users", "/api/sessions"],
+        ["sessions.http"] = ["/api/users", "/api/sessions", "/api/reservations"],
     };
 
     [Fact]

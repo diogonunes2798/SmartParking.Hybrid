@@ -1,8 +1,8 @@
-### Utilizadores, sessões e pagamento (UC-02, RF-02, especificação 002, F3a)
-# Um pedido por endpoint de «API Contract» de utilizadores e de sessões, por ordem: preparação (parque, zona,
-# lugar e tarifário), condutor, abrir, consultar, fechar, pagar e, no fim, as remoções. Cada pedido usa as respostas
-# dos anteriores (REST Client). O teste HttpFileTests (AC-20) confirma que todos os endpoints de /api/users e
-# /api/sessions estão aqui. As reservas (/api/reservations) entram na F3b.
+### Utilizadores, sessões, pagamento e reservas (UC-02, RF-02, especificação 002, F3a e F3b)
+# Um pedido por endpoint de «API Contract» de utilizadores, sessões e reservas, por ordem: preparação (parque, zona,
+# lugar e tarifário), condutor, abrir, consultar, fechar, pagar, reservar, cumprir, cancelar e, no fim, as remoções.
+# Cada pedido usa as respostas dos anteriores (REST Client). O teste HttpFileTests (AC-20) confirma que todos os
+# endpoints de /api/users, /api/sessions e /api/reservations estão aqui.
 # Pré-requisitos: docker compose up -d --wait; migrações como dono (inclui OpenSessionPerVehicle);
 # scripts/db-app-user.sh; Api a correr com o login da aplicação (ver docs/DIARIO.md, F2a).
 
@@ -127,6 +127,62 @@ POST {{baseUrl}}/api/sessions/{{session.response.body.id}}/pay
 Content-Type: application/json
 
 { "paymentMethodId": "{{card.response.body.id}}" }
+
+########################################################################## Reserva (AC-22 a AC-30, F3b)
+
+### Criar uma reserva que começa daqui a 2 minutos (201 + Location; 400 regras de tempo e horário; 409 sobreposição)
+# @name reservation
+POST {{baseUrl}}/api/reservations
+Content-Type: application/json
+
+{
+  "spotId": "{{spot.response.body.id}}",
+  "userId": "{{user.response.body.id}}",
+  "vehicleId": "{{vehicle.response.body.id}}",
+  "startsAt": "{{$datetime iso8601 2 m}}",
+  "endsAt": "{{$datetime iso8601 12 m}}"
+}
+
+### Obter a reserva (estado atual)
+GET {{baseUrl}}/api/reservations/{{reservation.response.body.id}}
+
+### Abrir uma sessão com a reserva (201: a reserva passa a Fulfilled na mesma transação)
+# @name reservedSession
+POST {{baseUrl}}/api/sessions
+Content-Type: application/json
+
+{ "spotId": "{{spot.response.body.id}}", "vehicleId": "{{vehicle.response.body.id}}", "reservationId": "{{reservation.response.body.id}}" }
+
+### Fechar a sessão da reserva
+POST {{baseUrl}}/api/sessions/{{reservedSession.response.body.id}}/close
+
+### Outra reserva, a cancelar
+# @name toCancel
+POST {{baseUrl}}/api/reservations
+Content-Type: application/json
+
+{
+  "spotId": "{{spot.response.body.id}}",
+  "userId": "{{user.response.body.id}}",
+  "vehicleId": "{{vehicle.response.body.id}}",
+  "startsAt": "{{$datetime iso8601 13 m}}",
+  "endsAt": "{{$datetime iso8601 23 m}}"
+}
+
+### Cancelar a reserva (200 Cancelled; cancelar de novo dá 409)
+POST {{baseUrl}}/api/reservations/{{toCancel.response.body.id}}/cancel
+
+### Uma reserva que ninguém cumpre: o worker passa-a a Expired depois da tolerância (Reservations:ExpiryGraceMinutes)
+POST {{baseUrl}}/api/reservations
+Content-Type: application/json
+
+{
+  "spotId": "{{spot.response.body.id}}",
+  "userId": "{{user.response.body.id}}",
+  "vehicleId": "{{vehicle.response.body.id}}",
+  "startsAt": "{{$datetime iso8601 25 m}}",
+  "endsAt": "{{$datetime iso8601 35 m}}"
+}
 
 ########################################################################## Remoções
 
