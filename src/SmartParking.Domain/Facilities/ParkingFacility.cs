@@ -89,6 +89,21 @@ public sealed class ParkingFacility : AggregateRoot
         return true;
     }
 
+    /// <summary>
+    /// Whether <paramref name="instant"/> falls inside the opening hours of its local day, in the facility's time zone:
+    /// [opensAt, closesAt), so the facility is already closed at closesAt (decision 4 of plan 002a). A day without a
+    /// row is closed (spec 002).
+    /// </summary>
+    public bool IsOpenAt(DateTimeOffset instant)
+    {
+        var local = TimeZoneInfo.ConvertTime(instant, TimeZoneInfo.FindSystemTimeZoneById(TimeZone));
+        var time = TimeOnly.FromTimeSpan(local.TimeOfDay);
+
+        return openingHours.Find(hours => hours.DayOfWeek == local.DayOfWeek) is { } day
+            && time >= day.OpensAt
+            && time < day.ClosesAt;
+    }
+
     /// <summary>Records the deletion. The database refuses it (FK RESTRICT) while zones, spots, sensors or tariffs exist.</summary>
     public void MarkForDeletion() =>
         Raise(new FacilityDeleted(Id, OperatorId, Name, Location.Latitude, Location.Longitude, TimeZone, Status));

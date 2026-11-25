@@ -35,7 +35,7 @@ public sealed class InvariantTests
     public void User_MixedCaseEmail_IsStoredInLowerCase()
     {
         // Act
-        var user = User.Create(Guid.CreateVersion7(), "Ana", "  Ana.Silva@Example.PT ");
+        var user = User.Register(Guid.CreateVersion7(), "Ana", "  Ana.Silva@Example.PT ");
 
         // Assert
         Assert.Equal("ana.silva@example.pt", user.Email);
@@ -47,7 +47,7 @@ public sealed class InvariantTests
     public void Vehicle_LicensePlate_IsNormalised(string input, string expected)
     {
         // Act
-        var vehicle = Vehicle.Create(Guid.CreateVersion7(), Guid.CreateVersion7(), input);
+        var vehicle = User.Register(Guid.CreateVersion7(), "Ana", "ana@example.pt").RegisterVehicle(Guid.CreateVersion7(), input);
 
         // Assert
         Assert.Equal(expected, vehicle.LicensePlate);
@@ -56,8 +56,11 @@ public sealed class InvariantTests
     [Fact]
     public void Vehicle_LicensePlateWithSymbols_Throws()
     {
+        // Arrange
+        var user = User.Register(Guid.CreateVersion7(), "Ana", "ana@example.pt");
+
         // Act + Assert
-        Assert.Throws<ArgumentException>(() => Vehicle.Create(Guid.CreateVersion7(), Guid.CreateVersion7(), "AA/12"));
+        Assert.Throws<ArgumentException>(() => user.RegisterVehicle(Guid.CreateVersion7(), "AA/12"));
     }
 
     [Fact]

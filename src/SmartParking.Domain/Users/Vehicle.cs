@@ -2,7 +2,10 @@ using SmartParking.Domain.Common;
 
 namespace SmartParking.Domain.Users;
 
-/// <summary>Vehicle of a user. The licence plate is normalised (upper case, no spaces or hyphens) and unique.</summary>
+/// <summary>
+/// Vehicle of a user. The licence plate is normalised (upper case, no spaces or hyphens) and unique.
+/// Created and removed through <see cref="User"/>, which raises the events.
+/// </summary>
 public sealed class Vehicle
 {
     public const int LicensePlateMaxLength = 16;
@@ -17,7 +20,7 @@ public sealed class Vehicle
 
     public string LicensePlate { get; private init; } = string.Empty;
 
-    public static Vehicle Create(Guid id, Guid userId, string licensePlate) => new()
+    internal static Vehicle Create(Guid id, Guid userId, string licensePlate) => new()
     {
         Id = Guard.Id(id),
         UserId = Guard.Id(userId),
