@@ -18,6 +18,9 @@ internal sealed class ParkingFacilityRepository(SmartParkingDbContext db) : IPar
     public Task<ParkingFacility?> GetByIdAsync(Guid id, CancellationToken cancellationToken) =>
         ById(db, id, cancellationToken);
 
+    public Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken) =>
+        db.ParkingFacilities.AnyAsync(facility => facility.Id == id, cancellationToken);
+
     public void Add(ParkingFacility facility) => db.ParkingFacilities.Add(facility);
 
     public void Remove(ParkingFacility facility) => db.ParkingFacilities.Remove(facility);

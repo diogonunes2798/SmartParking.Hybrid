@@ -10,6 +10,9 @@ public interface IParkingFacilityRepository
 {
     Task<ParkingFacility?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
 
+    /// <summary>Whether the facility exists, for the 404 of the commands on its zones, spots, sensors and tariffs.</summary>
+    Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken);
+
     void Add(ParkingFacility facility);
 
     void Remove(ParkingFacility facility);

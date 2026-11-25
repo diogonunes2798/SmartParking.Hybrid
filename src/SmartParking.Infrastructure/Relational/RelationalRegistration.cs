@@ -43,6 +43,14 @@ internal static class RelationalRegistration
         // Configuration ports (spec 001): one repository per aggregate root, one read port per query family.
         services.AddScoped<IParkingFacilityRepository, ParkingFacilityRepository>();
         services.AddScoped<IFacilityReader, FacilityReader>();
+        services.AddScoped<IZoneRepository, ZoneRepository>();
+        services.AddScoped<IZoneReader, ZoneReader>();
+        services.AddScoped<IParkingSpotRepository, ParkingSpotRepository>();
+        services.AddScoped<ISpotReader, SpotReader>();
+        services.AddScoped<ISensorRepository, SensorRepository>();
+        services.AddScoped<ISensorReader, SensorReader>();
+        services.AddScoped<ITariffRepository, TariffRepository>();
+        services.AddScoped<ITariffReader, TariffReader>();
 
         healthChecks.AddNpgSql(
             sp => sp.GetRequiredService<NpgsqlDataSource>(),
