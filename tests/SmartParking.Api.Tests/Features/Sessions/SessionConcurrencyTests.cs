@@ -27,7 +27,7 @@ public sealed class SessionConcurrencyTests(ApiFixture fixture)
         fixture.Clock.Advance(TimeSpan.FromMinutes(40));
 
         // Act
-        var responses = await RaceAsync(
+        var responses = await fixture.Gate.RaceAsync(
             () => SessionApi.CloseAsync(client, opened.Id, cancellationToken),
             () => SessionApi.CloseAsync(client, opened.Id, cancellationToken));
 
@@ -52,7 +52,7 @@ public sealed class SessionConcurrencyTests(ApiFixture fixture)
         var closed = await SessionApi.ClosedSessionAsync(client, fixture.Clock, arranged, TimeSpan.FromMinutes(40), cancellationToken);
 
         // Act
-        var responses = await RaceAsync(
+        var responses = await fixture.Gate.RaceAsync(
             () => SessionApi.PayAsync(client, closed.Id, arranged.PaymentMethodId, cancellationToken),
             () => SessionApi.PayAsync(client, closed.Id, arranged.PaymentMethodId, cancellationToken));
 
@@ -81,7 +81,7 @@ public sealed class SessionConcurrencyTests(ApiFixture fixture)
         var closed = await SessionApi.ClosedSessionAsync(client, fixture.Clock, arranged, TimeSpan.FromMinutes(40), cancellationToken);
 
         // Act
-        var responses = await RaceAsync(
+        var responses = await fixture.Gate.RaceAsync(
             () => SessionApi.PayAsync(client, closed.Id, arranged.PaymentMethodId, cancellationToken),
             () => SessionApi.PayAsync(client, closed.Id, declining.Id, cancellationToken));
 
@@ -109,7 +109,7 @@ public sealed class SessionConcurrencyTests(ApiFixture fixture)
         var (otherSpot, _) = await ConfigurationApi.CreateSpotAsync(client, arranged.Facility.Id, arranged.ZoneId, cancellationToken);
 
         // Act
-        var responses = await RaceAsync(
+        var responses = await fixture.Gate.RaceAsync(
             () => SessionApi.OpenAsync(client, arranged.SpotId, arranged.VehicleId, cancellationToken),
             () => SessionApi.OpenAsync(client, otherSpot.Id, arranged.VehicleId, cancellationToken));
 
@@ -120,20 +120,6 @@ public sealed class SessionConcurrencyTests(ApiFixture fixture)
         Assert.Equal(1, await DbProbe.ScalarAsync<long>(
             App, "SELECT count(*) FROM parking_sessions WHERE vehicle_id = $1", cancellationToken, arranged.VehicleId));
         Dispose(responses);
-    }
-
-    /// <summary>Arms the gate for both requests, runs them together and always disarms it, even when a request fails.</summary>
-    private async Task<HttpResponseMessage[]> RaceAsync(Func<Task<HttpResponseMessage>> first, Func<Task<HttpResponseMessage>> second)
-    {
-        fixture.Gate.Arm(2);
-        try
-        {
-            return await Task.WhenAll(first(), second());
-        }
-        finally
-        {
-            fixture.Gate.Disarm();
-        }
     }
 
     private static (HttpResponseMessage Winner, HttpResponseMessage Loser) Split(HttpResponseMessage[] responses)

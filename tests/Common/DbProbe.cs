@@ -1,6 +1,6 @@
 using Npgsql;
 
-namespace SmartParking.Api.Tests.Fixtures;
+namespace SmartParking.Tests.Common;
 
 /// <summary>
 /// Plain SQL against the test database, to arrange rows the F2a endpoints cannot create yet and to assert
