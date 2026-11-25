@@ -45,7 +45,7 @@ Estado: «por preencher» até existir uma especificação aprovada que cubra o 
 | Requisito | UC | AC-n | Especificação | Código | Teste | Estado |
 |---|---|---|---|---|---|---|
 | RF-01 | UC-01, UC-05 | por preencher | 003-ingestao (F4); 007-simulador-esquema (F8, `payload` extensível) | por preencher | por preencher | por preencher |
-| RF-02 | UC-02 | AC-1 a AC-21 (F3a); AC-22 a AC-30 (F3b) | 002-sessoes-pagamentos (F3a, F3b; aprovada a 2026-11-25) | por preencher | por preencher | especificada; implementação por fazer |
+| RF-02 | UC-02 | AC-1 a AC-21 (F3a); AC-22 a AC-30 (F3b) | 002-sessoes-pagamentos (F3a, F3b; aprovada a 2026-11-25) | plano [002a](plans/002a-utilizadores-sessoes-pagamento.md) | por preencher | F3a em implementação; F3b por fazer |
 | RF-03 | UC-03 | por preencher | 004-disponibilidade (F5) | por preencher | por preencher | por preencher |
 | RF-04 | UC-03 | por preencher | 004-disponibilidade (F5) | por preencher | por preencher | por preencher |
 | RF-05 | UC-04 | por preencher | 006-analitica (F7) | por preencher | por preencher | por preencher |
