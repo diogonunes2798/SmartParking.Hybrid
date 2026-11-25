@@ -38,7 +38,7 @@ src/SmartParking.Infrastructure/            um só projeto (E1), uma subpasta po
   Cache/                                    Redis: estado dos lugares, contadores, GEO, pub/sub
   Messaging/                                IEventBus: leitor da outbox, Redis Streams
 src/SmartParking.Api/                       endpoints e ingestão; Program.cs mínimo
-src/SmartParking.Workers/                   projetores, publicação da outbox, agregação, retenção
+src/SmartParking.Workers/                   expiração de reservas (F3b); projetores, publicação da outbox, agregação, retenção
 tools/SensorSimulator/                      gerador do cenário de referência (UC-01, UC-05); criado na F4
 tools/ProjectionRebuilder/                  reconstrói o estado do Redis a partir do MongoDB (RNF-03); criado na F6
 tests/                                      *.Tests com Features/ e Fixtures/ApiFixture.cs; SmartParking.ArchitectureTests
@@ -54,8 +54,9 @@ docker compose up -d                                   # PostgreSQL+PostGIS, Mon
 dotnet build SmartParking.slnx
 dotnet test                                            # precisa do Docker (Testcontainers)
 dotnet format --verify-no-changes
-dotnet run --project src/SmartParking.Api
-dotnet run --project src/SmartParking.Workers
+scripts/db-app-user.sh                                 # logins smartparking_api e smartparking_workers (depois das migrações; .env com as duas palavras-passe)
+dotnet run --project src/SmartParking.Api              # liga como smartparking_api
+dotnet run --project src/SmartParking.Workers          # liga como smartparking_workers; expira reservas a cada Reservations:ExpiryScanSeconds
 dotnet ef migrations add <Nome> --project src/SmartParking.Infrastructure --startup-project src/SmartParking.Api
 dotnet ef database update --project src/SmartParking.Infrastructure --startup-project src/SmartParking.Api
 dotnet run --project tools/SensorSimulator -- --spots 5000 --mean-interval 300 --peak-factor 10 --seed 42   # a partir da F4
