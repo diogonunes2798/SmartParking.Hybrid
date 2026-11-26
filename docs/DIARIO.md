@@ -661,8 +661,8 @@ Formato de cada entrada:
      - os testes de `SimulatorCommandTests` não têm `AC-n` no nome, porque validam opções que nenhum AC da especificação 003 descreve. Fica registado.
 - **Decisões:**
   - Achado 4 sem alteração: um envio cortado pelo prazo de escoamento conta como não entregue. A contagem é conservadora, e um reenvio seria ignorado pela idempotência da ingestão.
-  - O limite de 86 400 s do `--mean-interval` é um limite de correção, não um valor de desempenho. `TODO(Diogo):` confirmar o limite.
-  - Secções da tese do ADR 0009: proposta 5.9.4 e 7.3. `TODO(Diogo):` confirmar.
+  - O limite de 86 400 s do `--mean-interval` é um limite de correção, não um valor de desempenho. `TODO(Diogo):` confirmar o limite. *(Resolvido a 2026-11-26: confirmado; ver «Simulador: confirmação do limite do `--mean-interval` e das secções do ADR 0009».)*
+  - Secções da tese do ADR 0009: proposta 5.9.4 e 7.3. `TODO(Diogo):` confirmar. *(Resolvido a 2026-11-26: confirmadas.)*
 - ***Commits:***
   - `9518685`: correções dos achados 2, 5, 7 e 8;
   - `a4eee36`: achado 9;
@@ -730,3 +730,16 @@ Formato de cada entrada:
   - *Merge commit* em vez de *squash*, como nos PR anteriores.
   - Continuam em aberto: o limite de 86 400 s do `--mean-interval` e as secções da tese do ADR 0009 (`TODO(Diogo)` na entrada «F4b: fecho dos achados da revisão»).
 - ***Commits:*** `2601999` (*merge* do PR #7); registo desta entrada no *commit* seguinte.
+
+## Simulador: confirmação do limite do `--mean-interval` e das secções do ADR 0009
+
+- **Data:** 2026-11-26
+- **Decisões do Diogo (2026-11-26):**
+  - confirma o limite de 86 400 s (um dia) do `--mean-interval`. É um limite de correção, que evita o transbordo do `TimeSpan` no gerador, e não um valor de desempenho;
+  - confirma as secções da tese do ADR 0009: 5.9.4 e 7.3.
+- **Feito:**
+  - ADR 0009: o campo «Secções da tese» deixa de ser uma proposta;
+  - os dois `TODO(Diogo)` da entrada «F4b: fecho dos achados da revisão» ficam marcados como resolvidos, sem reescrever a entrada.
+- **Problemas:** nenhum. Só muda documentação; não há código nem testes alterados.
+- **Decisões:** o simulador deixa de ter `TODO(Diogo)` em aberto. Na especificação 003 mantém-se só o da redação da regra I-JSON do `payload` (entrada da F4a), que fica para a próxima revisão da especificação.
+- ***Commits:*** esta entrada e as duas alterações acima, num só *commit* na `main`.

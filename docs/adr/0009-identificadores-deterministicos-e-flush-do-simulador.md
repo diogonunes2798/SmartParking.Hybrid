@@ -7,7 +7,7 @@
   - AC-20 (reprodutibilidade) e AC-23 (envio) da especificação 003;
   - reprodutibilidade das medições do Cap. 7: a mesma `--seed` tem de dar a mesma carga em todas as execuções (`.claude/rules/medicoes.md`).
 - **Decisão (D1–D10):** nenhuma muda. O cenário de referência (Tabela 9) é o valor por omissão do simulador.
-- **Secções da tese:** proposta 5.9.4 e 7.3. `TODO(Diogo):` confirmar.
+- **Secções da tese:** 5.9.4 e 7.3 (confirmadas pelo Diogo a 2026-11-26).
 - **Especificação:** [003-ingestao](../specs/003-ingestao.md), secções do simulador e AC-19 a AC-24.
 
 ## Contexto
