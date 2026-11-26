@@ -30,17 +30,17 @@ internal static class SimulatorCommand
         Option<string> api = new("--api") { Description = "Base address of the Api", DefaultValueFactory = _ => "http://localhost:5080" };
         Option<bool> provision = new("--provision") { Description = "Register the facility, zones, spots and sensors through the F2 endpoints and write the mapping" };
         Option<FileInfo> mapping = new("--mapping") { Description = "Mapping file (hardwareId–spotId)", DefaultValueFactory = _ => new FileInfo("sensor-map.json") };
-        Option<int> spots = new("--spots") { Description = "Spots to provision (Table 9)", DefaultValueFactory = _ => 5_000 };
-        Option<int> zones = new("--zones") { Description = "Zones to provision; spots are split across them in order", DefaultValueFactory = _ => 5 };
-        Option<int> seed = new("--seed") { Description = "Seed of the layout, initial states, intervals and eventIds", DefaultValueFactory = _ => 42 };
-        Option<double> meanInterval = new("--mean-interval") { Description = "Mean seconds between two events of one spot (Table 9)", DefaultValueFactory = _ => 300 };
-        Option<double> peakFactor = new("--peak-factor") { Description = "Rate multiplier inside a peak window (Table 9)", DefaultValueFactory = _ => 10 };
-        Option<TimeSpan[]> peakAt = new("--peak-at") { Description = "Start of a peak window, as an offset from the start of the run (repeatable)" };
-        Option<TimeSpan[]> peakDuration = new("--peak-duration") { Description = "Length of the peak window at the same position (repeatable)" };
-        Option<TimeSpan?> duration = new("--duration") { Description = "Length of the run; until Ctrl+C when absent" };
-        Option<int> batchSize = new("--batch-size") { Description = "Events per batch (at most 500)", DefaultValueFactory = _ => SenderSettings.Default.BatchSize };
-        Option<TimeSpan> flushInterval = new("--flush-interval") { Description = "Longest wait of a buffered event before its batch is sent", DefaultValueFactory = _ => SenderSettings.Default.FlushInterval };
-        Option<int> maxRetries = new("--max-retries") { Description = "Resends of a batch after a 503", DefaultValueFactory = _ => SenderSettings.Default.MaxRetries };
+        Option<int> spots = new("--spots") { CustomParser = InvariantParsers.Int32, Description = "Spots to provision (Table 9)", DefaultValueFactory = _ => 5_000 };
+        Option<int> zones = new("--zones") { CustomParser = InvariantParsers.Int32, Description = "Zones to provision; spots are split across them in order", DefaultValueFactory = _ => 5 };
+        Option<int> seed = new("--seed") { CustomParser = InvariantParsers.Int32, Description = "Seed of the layout, initial states, intervals and eventIds", DefaultValueFactory = _ => 42 };
+        Option<double> meanInterval = new("--mean-interval") { CustomParser = InvariantParsers.Double, Description = "Mean seconds between two events of one spot (Table 9)", DefaultValueFactory = _ => 300 };
+        Option<double> peakFactor = new("--peak-factor") { CustomParser = InvariantParsers.Double, Description = "Rate multiplier inside a peak window (Table 9)", DefaultValueFactory = _ => 10 };
+        Option<TimeSpan[]> peakAt = new("--peak-at") { CustomParser = InvariantParsers.TimeSpans, Description = "Start of a peak window, as an offset from the start of the run (repeatable)" };
+        Option<TimeSpan[]> peakDuration = new("--peak-duration") { CustomParser = InvariantParsers.TimeSpans, Description = "Length of the peak window at the same position (repeatable)" };
+        Option<TimeSpan?> duration = new("--duration") { CustomParser = InvariantParsers.OptionalTimeSpan, Description = "Length of the run; until Ctrl+C when absent" };
+        Option<int> batchSize = new("--batch-size") { CustomParser = InvariantParsers.Int32, Description = "Events per batch (at most 500)", DefaultValueFactory = _ => SenderSettings.Default.BatchSize };
+        Option<TimeSpan> flushInterval = new("--flush-interval") { CustomParser = InvariantParsers.TimeSpan, Description = "Longest wait of a buffered event before its batch is sent", DefaultValueFactory = _ => SenderSettings.Default.FlushInterval };
+        Option<int> maxRetries = new("--max-retries") { CustomParser = InvariantParsers.Int32, Description = "Resends of a batch after a 503", DefaultValueFactory = _ => SenderSettings.Default.MaxRetries };
 
         RootCommand root = new("SmartParking sensor simulator: provisions the reference scenario and emits occupancy events (spec 003)")
         {
