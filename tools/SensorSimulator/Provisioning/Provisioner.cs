@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using SmartParking.SensorSimulator.Wire;
 
@@ -53,8 +54,7 @@ internal sealed partial class Provisioner(IHttpClientFactory httpClientFactory, 
             var zoneId = created.Value!.Id;
             zoneIds.Add(zoneId);
 
-            var first = zone * settings.Spots / settings.Zones;
-            var last = (zone + 1) * settings.Spots / settings.Zones;
+            var (first, last) = ZoneRange(zone, settings.Spots, settings.Zones);
             for (var chunk = first; chunk < last; chunk += SpotBatchRequest.MaxItems)
             {
                 var spots = Enumerable.Range(chunk + 1, Math.Min(SpotBatchRequest.MaxItems, last - chunk))
@@ -81,6 +81,14 @@ internal sealed partial class Provisioner(IHttpClientFactory httpClientFactory, 
         return ProvisionOutcome.Success(new SensorMap(settings.Seed, facilityId, zoneIds, sensors));
     }
 
+    /// <summary>
+    /// The 0-based spot range [<c>First</c>, <c>Last</c>) of zone <paramref name="zone"/>, splitting the spots in order.
+    /// The product is taken in <see cref="long"/>, because <c>zone * spots</c> exceeds <see cref="int"/> above about
+    /// 46 000 spots (review of F4b, finding 7).
+    /// </summary>
+    internal static (int First, int Last) ZoneRange(int zone, int spots, int zones) =>
+        ((int)((long)zone * spots / zones), (int)((long)(zone + 1) * spots / zones));
+
     private static string ZoneName(int zone) => string.Create(CultureInfo.InvariantCulture, $"Z{zone + 1}");
 
     private static CreateFacilityRequest NewFacility(int seed) => new(
@@ -92,21 +100,46 @@ internal sealed partial class Provisioner(IHttpClientFactory httpClientFactory, 
         "Europe/Lisbon",
         [.. Enumerable.Range(0, 7).Select(day => new OpeningHoursRequest(day, TimeOnly.MinValue, new TimeOnly(23, 59, 59)))]);
 
+    // A transport failure or an unreadable success body stops the provisioning like an error answer, so the command
+    // exits with ProvisioningFailed instead of an unhandled exception (review of F4b, finding 2).
     private static async Task<(TResponse? Value, string? Error)> PostAsync<TResponse>(
         HttpClient client, string route, object body, CancellationToken cancellationToken)
     {
-        using var response = await client.PostAsJsonAsync(route, body, ApiWire.Json, cancellationToken);
-        if (!response.IsSuccessStatusCode)
+        try
         {
-            var problem = await response.Content.ReadAsStringAsync(cancellationToken);
-            return (default, string.Create(CultureInfo.InvariantCulture, $"POST {route} returned {(int)response.StatusCode}: {problem}"));
-        }
+            using var response = await client.PostAsJsonAsync(route, body, ApiWire.Json, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var problem = await response.Content.ReadAsStringAsync(cancellationToken);
+                return (default, string.Create(CultureInfo.InvariantCulture, $"POST {route} returned {(int)response.StatusCode}: {problem}"));
+            }
 
-        var value = await response.Content.ReadFromJsonAsync<TResponse>(ApiWire.Json, cancellationToken);
-        return value is null
-            ? (default, string.Create(CultureInfo.InvariantCulture, $"POST {route} returned an empty body"))
-            : (value, null);
+            var value = await response.Content.ReadFromJsonAsync<TResponse>(ApiWire.Json, cancellationToken);
+            return value is null
+                ? (default, string.Create(CultureInfo.InvariantCulture, $"POST {route} returned an empty body"))
+                : (value, null);
+        }
+        catch (HttpRequestException exception)
+        {
+            return (default, Failed(route, exception));
+        }
+        catch (TaskCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // HttpClient.Timeout: the request was not cancelled by the caller, it timed out.
+            return (default, Failed(route, exception));
+        }
+        catch (JsonException exception)
+        {
+            return (default, Failed(route, exception));
+        }
+        catch (IOException exception)
+        {
+            return (default, Failed(route, exception));
+        }
     }
+
+    private static string Failed(string route, Exception exception) =>
+        string.Create(CultureInfo.InvariantCulture, $"POST {route} failed: {exception.Message}");
 
     [LoggerMessage(EventId = 20, Level = LogLevel.Information,
         Message = "Provisioned facility {FacilityId}: {Zones} zones, {Sensors} spots with sensors (seed {Seed})")]
