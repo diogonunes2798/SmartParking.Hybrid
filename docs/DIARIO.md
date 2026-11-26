@@ -670,3 +670,23 @@ Formato de cada entrada:
   - `e044897`: segunda ronda de correções;
   - `392280d`: texto do ADR;
   - esta entrada fica no *commit* seguinte.
+
+## F4b: integração do fecho da revisão na `main`
+
+- **Data:** 2026-11-26
+- **Feito:**
+  - *Push* do ramo `fix/003-simulador-revisao` (6 *commits*) e abertura do [PR #6](https://github.com/diogonunes2798/SmartParking.Hybrid/pull/6) a pedido do Diogo. A descrição inclui:
+    - as decisões do Diogo;
+    - as correções por achado e o ADR 0009;
+    - a revisão independente;
+    - a verificação;
+    - os três `TODO(Diogo)` em aberto.
+  - *Merge* pedido pelo Diogo, com *merge commit* (`52db1e5`). O GitHub indicava o PR como integrável e sem conflitos, e o `HEAD` do PR era o mesmo da cópia local (`a922b4f`, verificado com `--match-head-commit`).
+  - Linha do RF-01 da RASTREABILIDADE atualizada com o PR #6.
+- **Problemas:**
+  - O repositório continua sem integração contínua, por isso o PR não teve verificações automáticas. A garantia são os resultados locais registados na descrição: 461 testes em duas corridas seguidas, *build* e *format* limpos.
+  - Depois de mudar para a `main`, o `dotnet format --verify-no-changes` continuou limpo. O problema dos finais de linha da integração anterior não se repetiu.
+- **Decisões:**
+  - *Merge commit* em vez de *squash*, para que os *commits* referidos na entrada anterior continuem a existir na `main`.
+  - Continuam em aberto: a leitura dos números na linha de comandos com a cultura atual, o limite de 86 400 s do `--mean-interval` e as secções da tese do ADR 0009 (`TODO(Diogo)` na entrada anterior).
+- ***Commits:*** `52db1e5` (*merge* do PR #6); registo desta entrada no *commit* seguinte.
