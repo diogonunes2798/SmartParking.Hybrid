@@ -82,6 +82,8 @@ internal sealed partial class GatewayRunner(IngestionSender sender, TimeProvider
             outcomes.AddRange(await gateway.CompleteAsync());
         }
 
+        // Also counts the batches never sent because the drain timeout passed.
+        var notDelivered = generated - outcomes.Where(outcome => outcome.Delivered).Sum(outcome => (long)outcome.Events);
         var summary = new RunSummary(
             start,
             generated,
@@ -90,8 +92,7 @@ internal sealed partial class GatewayRunner(IngestionSender sender, TimeProvider
             outcomes.Sum(outcome => (long)outcome.Duplicates),
             outcomes.Sum(outcome => (long)outcome.Rejected),
             outcomes.Sum(outcome => (long)outcome.Retries),
-            // Also counts the batches never sent because the drain timeout passed.
-            generated - outcomes.Where(outcome => outcome.Delivered).Sum(outcome => (long)outcome.Events));
+            notDelivered);
 
         LogFinished(logger, summary.Generated, summary.Batches, summary.Accepted, summary.Duplicates, summary.Rejected,
             summary.Retries, summary.NotDeliveredEvents);

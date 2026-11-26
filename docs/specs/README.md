@@ -23,7 +23,7 @@
 | F1 | Fundação da solução | transversal; OE6 | [000-visao-geral](000-visao-geral.md) | — | 5.9.1 | Aprovada | 2026-11-24 |
 | F2 | Domínio, subcamada relacional e configuração (implementação em F2a e F2b) | RF-06; UC-02 e UC-05 (configuração); RNF-06 (auditoria) | [001-configuracao](001-configuracao.md) | F1 | 5.1, 5.4, 5.9.2 | Implementada e integrada na `main` (PR #2, 2026-11-25) | 2026-11-24 |
 | F3 | Sessões, reservas e pagamentos (implementação em F3a e F3b) | UC-02; RF-02 | [002-sessoes-pagamentos](002-sessoes-pagamentos.md) | F2 | 5.4.1, 5.4.2 | F3a e F3b implementadas e integradas na `main` (PR #3, 2026-11-25) | 2026-11-25 |
-| F4 | Ingestão de eventos | UC-01; RF-01 | [003-ingestao](003-ingestao.md) | F2 | 5.3, 5.5, 5.9.4 | Aprovada (F4a integrada na `main`, PR #4; F4b implementada no ramo `feat/003-simulador`, por integrar) | 2026-11-25 |
+| F4 | Ingestão de eventos | UC-01; RF-01 | [003-ingestao](003-ingestao.md) | F2 | 5.3, 5.5, 5.9.4 | F4a e F4b implementadas e integradas na `main` (PR #4 e PR #5, 2026-11-26) | 2026-11-25 |
 | F5 | Vista de disponibilidade e pesquisa geoespacial | UC-03; RF-03, RF-04 | [004-disponibilidade](004-disponibilidade.md) | F4 | 5.5.3, 5.7 | Por especificar | — |
 | F6 | Sincronização e janela de consistência | OE4; RNF-01 (UC-01) | [005-sincronizacao](005-sincronizacao.md) | F4, F5 | 5.6.2, 5.8 | Por especificar | — |
 | F7 | Camada analítica | UC-04; RF-05 | [006-analitica](006-analitica.md) | F3, F6 | 5.6.3 | Por especificar | — |

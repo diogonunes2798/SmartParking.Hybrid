@@ -582,4 +582,23 @@ Formato de cada entrada:
      - um mapeamento mal formado dá uma exceção não tratada.
   8. Nenhum teste exercita o *flush* por tempo dentro do `GatewayRunner`. O acumulador está provado com o relógio falso, mas a corrida em tempo real só usa lotes cheios e o *flush* final.
   9. A correção de +1 ms por lugar pode deixar a sequência global fora de ordem por 1 ms; é inofensivo, mas o comentário diz «ordenada».
-- ***Commits:*** `52dcab8` (código e testes), `88ded9c` (documentação), o das correções da revisão e o desta atualização do diário. Por integrar na `main`; nada enviado para o `origin`.
+- ***Commits:*** `52dcab8` (código e testes), `88ded9c` (documentação), `e56a160` (correções da revisão) e `b953717` (esta atualização do diário).
+
+## F4b: integração na `main`
+
+- **Data:** 2026-11-26
+- **Feito:**
+  - *Push* do ramo `feat/003-simulador` (4 *commits*) e abertura do [PR #5](https://github.com/diogonunes2798/SmartParking.Hybrid/pull/5) a pedido do Diogo. A descrição inclui:
+    - o resumo e a tabela dos testes AC-19 a AC-24;
+    - a verificação;
+    - os achados corrigidos e os que ficam em aberto da revisão;
+    - os pontos por decidir.
+  - *Merge* pedido pelo Diogo, com *merge commit* (`0fe6fb1`), como nas fases anteriores. O GitHub indicava o PR como integrável e sem conflitos, e o `HEAD` do PR era o mesmo da cópia local (`b953717`, verificado com `--match-head-commit`).
+  - Especificação 003 marcada no índice como implementada e integrada (F4a e F4b); linha do RF-01 da RASTREABILIDADE atualizada.
+- **Problemas:**
+  - O repositório continua sem integração contínua, por isso o PR não teve verificações automáticas. A garantia são os resultados locais registados na descrição: 448 testes em duas corridas seguidas, build e format limpos.
+- **Decisões:**
+  - *Merge commit* em vez de *squash*, para que os *commits* da F4b referidos neste diário continuem a existir na `main`.
+  - O ramo `feat/003-simulador` foi apagado no `origin` e localmente, a pedido do Diogo, depois de se confirmar que estava integrado na `main` (`git merge-base --is-ancestor`).
+  - Continuam em aberto da F4b: os achados 2, 4, 5, 7, 8 e 9 da revisão e os dois `TODO(Diogo)` (emitir logo a seguir ao `--provision`; ADR 0009 para o `eventId` determinístico).
+- ***Commits:*** `0fe6fb1` (*merge* do PR #5); registo desta entrada no commit seguinte.
