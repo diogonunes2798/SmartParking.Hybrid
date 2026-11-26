@@ -13,6 +13,7 @@ using SmartParking.SensorSimulator;
 using SmartParking.SensorSimulator.Generation;
 using SmartParking.SensorSimulator.Provisioning;
 using SmartParking.SensorSimulator.Sending;
+using SmartParking.SensorSimulator.Wire;
 using static SmartParking.Api.Tests.Fixtures.IngestionApi;
 
 namespace SmartParking.Api.Tests.Features.Simulator;
@@ -197,11 +198,13 @@ public sealed class SimulatorApiTests(ApiFixture fixture)
     [Fact]
     public async Task Emit_CancelledBeforeDuration_ExitsWithCancelled_AC23()
     {
-        // Arrange: a provisioned mapping and a run without --duration (review of F4b, finding 5).
+        // Arrange: a provisioned mapping and a run without --duration, cancelled when its first batch goes out
+        // (review of F4b, finding 5).
         var cancellationToken = TestContext.Current.CancellationToken;
         var api = fixture.Hybrid;
         var mappingFile = Path.Combine(Path.GetTempPath(), $"sensor-map-{Guid.NewGuid():N}.json");
-        var command = SimulatorCommand.Create(services => SimulatorHost.UseTestServer(services, api));
+        using var ctrlC = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var command = SimulatorCommand.Create(services => SimulatorHost.UseTestServer(services, api, new CancelOnRequestHandler(ctrlC, ApiWire.IngestRoute)));
         var address = api.Server.BaseAddress.ToString();
         var seed = Random.Shared.Next(1_000_000, int.MaxValue).ToString(CultureInfo.InvariantCulture);
 
@@ -211,8 +214,6 @@ public sealed class SimulatorApiTests(ApiFixture fixture)
                 .Parse(["--provision", "--spots", "5", "--zones", "1", "--seed", seed, "--mapping", mappingFile, "--api", address])
                 .InvokeAsync(cancellationToken: cancellationToken);
             Assert.Equal(ExitCodes.Success, provisioned);
-            using var ctrlC = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            ctrlC.CancelAfter(TimeSpan.FromSeconds(1));
 
             // Act
             var exitCode = await command
@@ -226,6 +227,27 @@ public sealed class SimulatorApiTests(ApiFixture fixture)
         {
             File.Delete(mappingFile);
         }
+    }
+
+    [Fact]
+    public async Task Provision_CancelledMidway_ExitsWithCancelledAndWritesNoMapping_AC19()
+    {
+        // Arrange: Ctrl+C when the first spots/batch request goes out (second review of F4b).
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var api = fixture.Hybrid;
+        var mappingFile = Path.Combine(Path.GetTempPath(), $"sensor-map-{Guid.NewGuid():N}.json");
+        using var ctrlC = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var command = SimulatorCommand.Create(services => SimulatorHost.UseTestServer(services, api, new CancelOnRequestHandler(ctrlC, "/spots/batch")));
+        var seed = Random.Shared.Next(1_000_000, int.MaxValue).ToString(CultureInfo.InvariantCulture);
+
+        // Act
+        var exitCode = await command
+            .Parse(["--provision", "--spots", "4", "--zones", "1", "--seed", seed, "--mapping", mappingFile, "--api", api.Server.BaseAddress.ToString()])
+            .InvokeAsync(cancellationToken: ctrlC.Token);
+
+        // Assert
+        Assert.Equal(ExitCodes.Cancelled, exitCode);
+        Assert.False(File.Exists(mappingFile));
     }
 
     [Fact]

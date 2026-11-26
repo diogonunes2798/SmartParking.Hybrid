@@ -88,14 +88,16 @@ internal static class OccupancyGenerator
         {
             // 1 - U lies in (0, 1], so the logarithm is finite.
             var draw = -Math.Log(1.0 - random.NextDouble()) / settings.RateAt(current);
-            var candidate = current + TimeSpan.FromSeconds(draw);
-            if (settings.NextBoundaryAfter(current) is { } boundary && candidate >= boundary)
+
+            // Compared in seconds before any TimeSpan is built: inside a window with a tiny --peak-factor the draw can
+            // exceed TimeSpan.MaxValue, but it never passes the window's end (second review of F4b).
+            if (settings.NextBoundaryAfter(current) is { } boundary && draw >= (boundary - current).TotalSeconds)
             {
                 current = boundary;
                 continue;
             }
 
-            return candidate;
+            return current + TimeSpan.FromSeconds(draw);
         }
     }
 

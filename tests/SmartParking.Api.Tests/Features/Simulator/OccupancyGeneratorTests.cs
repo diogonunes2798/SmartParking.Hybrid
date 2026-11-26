@@ -83,6 +83,24 @@ public sealed class OccupancyGeneratorTests
     }
 
     [Fact]
+    public void Generate_TinyPeakFactorInsideWindow_SkipsToWindowEndWithoutOverflow_AC22()
+    {
+        // Arrange: inside the window the mean wait is 60 s / 1e-12 = 6e13 s, beyond TimeSpan.MaxValue (about 9.2e11 s)
+        // (second review of F4b).
+        var map = SimulatorMaps.Synthetic(3);
+        var window = new PeakWindow(TimeSpan.Zero, TimeSpan.FromHours(1));
+        var settings = new GeneratorSettings(42, TimeSpan.FromSeconds(60), 1e-12, [window]);
+        var start = Clock.GetUtcNow();
+
+        // Act
+        var events = OccupancyGenerator.Generate(map, settings, start).Take(30).ToList();
+
+        // Assert: no event falls inside the window; the generation resumes after it.
+        Assert.Equal(30, events.Count);
+        Assert.All(events, item => Assert.True(item.Timestamp >= start + window.End, $"Event at {item.Timestamp:O} is inside the window."));
+    }
+
+    [Fact]
     public void Generate_EventsPerSpot_AlternateOccupiedAndFreed_AC21()
     {
         // Arrange

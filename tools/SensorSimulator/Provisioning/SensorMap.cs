@@ -11,10 +11,26 @@ internal sealed record SensorMap(int Seed, Guid FacilityId, IReadOnlyList<Guid> 
 {
     private static readonly JsonSerializerOptions FileJson = new(ApiWire.Json) { WriteIndented = true };
 
+    /// <summary>
+    /// Writes to a temporary file next to <paramref name="path"/> and then moves it into place, so a cancelled or
+    /// failed write never leaves a truncated mapping (second review of F4b).
+    /// </summary>
     public async Task SaveAsync(string path, CancellationToken cancellationToken)
     {
-        await using var stream = File.Create(path);
-        await JsonSerializer.SerializeAsync(stream, this, FileJson, cancellationToken);
+        var temporary = path + ".tmp";
+        try
+        {
+            await using (var stream = File.Create(temporary))
+            {
+                await JsonSerializer.SerializeAsync(stream, this, FileJson, cancellationToken);
+            }
+
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            File.Delete(temporary);
+        }
     }
 
     /// <summary>Reads a mapping; <see langword="null"/> when the file holds no mapping.</summary>

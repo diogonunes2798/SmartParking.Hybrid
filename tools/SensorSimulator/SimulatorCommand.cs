@@ -133,21 +133,30 @@ internal static class SimulatorCommand
             using var host = BuildHost(ApiAddress(parse.GetValue(api))!, configureServices);
             var file = parse.GetValue(mapping)!;
 
-            if (parse.GetValue(provision))
+            // Ctrl+C outside the emitting loop (provisioning, loading the mapping) also exits with Cancelled, not with
+            // System.CommandLine's 1 for an unhandled exception (second review of F4b).
+            try
             {
-                var settings = new ProvisionSettings(parse.GetValue(spots), parse.GetValue(zones), parse.GetValue(seed));
-                return await ProvisionAsync(host.Services, settings, file, cancellationToken);
-            }
+                if (parse.GetValue(provision))
+                {
+                    var settings = new ProvisionSettings(parse.GetValue(spots), parse.GetValue(zones), parse.GetValue(seed));
+                    return await ProvisionAsync(host.Services, settings, file, cancellationToken);
+                }
 
-            var starts = parse.GetValue(peakAt) ?? [];
-            var lengths = parse.GetValue(peakDuration) ?? [];
-            var generator = new GeneratorSettings(
-                parse.GetValue(seed),
-                TimeSpan.FromSeconds(parse.GetValue(meanInterval)),
-                parse.GetValue(peakFactor),
-                [.. starts.Zip(lengths, (start, length) => new PeakWindow(start, length))]);
-            var sender = new SenderSettings(parse.GetValue(batchSize), parse.GetValue(flushInterval), parse.GetValue(maxRetries));
-            return await EmitAsync(host.Services, file, generator, sender, parse.GetValue(duration), cancellationToken);
+                var starts = parse.GetValue(peakAt) ?? [];
+                var lengths = parse.GetValue(peakDuration) ?? [];
+                var generator = new GeneratorSettings(
+                    parse.GetValue(seed),
+                    TimeSpan.FromSeconds(parse.GetValue(meanInterval)),
+                    parse.GetValue(peakFactor),
+                    [.. starts.Zip(lengths, (start, length) => new PeakWindow(start, length))]);
+                var sender = new SenderSettings(parse.GetValue(batchSize), parse.GetValue(flushInterval), parse.GetValue(maxRetries));
+                return await EmitAsync(host.Services, file, generator, sender, parse.GetValue(duration), cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return ExitCodes.Cancelled;
+            }
         });
 
         return root;
