@@ -644,7 +644,7 @@ Formato de cada entrada:
     - um mapeamento truncado deu o código 4;
     - o código 130 com Ctrl+C real não foi experimentado à mão. Cobrem-no os dois testes de cancelamento.
 - **Problemas:**
-  - O primeiro teste de cancelamento usava `--mean-interval 0.1` e saiu com o código 1. O System.CommandLine lê os números com a cultura atual, e em pt-PT o separador decimal é a vírgula. O teste passou a usar `1`. Fica um ponto em aberto: na linha de comandos, `0.5` é rejeitado numa máquina em português. `TODO(Diogo):` decidir se as opções numéricas devem passar a ler-se com a cultura invariante.
+  - O primeiro teste de cancelamento usava `--mean-interval 0.1` e saiu com o código 1. O System.CommandLine lê os números com a cultura atual, e em pt-PT o separador decimal é a vírgula. O teste passou a usar `1`. Fica um ponto em aberto: na linha de comandos, `0.5` é rejeitado numa máquina em português. `TODO(Diogo):` decidir se as opções numéricas devem passar a ler-se com a cultura invariante. *(Resolvido a 2026-11-26: cultura invariante; ver «Simulador: opções lidas com a cultura invariante».)*
   - A mutação do gerador sobreviveu à primeira versão do teste. Com `--peak-factor 1e-9` a espera média é cerca de 6e10 s, abaixo do máximo do `TimeSpan` (cerca de 9,2e11 s), por isso o transbordo não acontecia. O teste passou a usar 1e-12.
   - O plano previa um *commit* por achado, mas o `SimulatorCommand.cs` e o `SimulatorApiTests.cs` têm alterações de vários achados no mesmo ficheiro, e aqui não é possível separá-las por blocos de forma interativa. Ficou um *commit* para as correções e os testes, como o `e56a160` da revisão anterior.
 - **Revisão independente** (`code-reviewer`, só leitura, sobre `git diff 2b78399...HEAD`): confirmou o `ZoneRange`, as exceções apanhadas no `PostAsync`, a validação, o mapeamento mal formado, o comentário do gerador e a correspondência do ADR 0009 com o código. Achados, por gravidade:
@@ -690,3 +690,27 @@ Formato de cada entrada:
   - *Merge commit* em vez de *squash*, para que os *commits* referidos na entrada anterior continuem a existir na `main`.
   - Continuam em aberto: a leitura dos números na linha de comandos com a cultura atual, o limite de 86 400 s do `--mean-interval` e as secções da tese do ADR 0009 (`TODO(Diogo)` na entrada anterior).
 - ***Commits:*** `52db1e5` (*merge* do PR #6); registo desta entrada no *commit* seguinte.
+
+## Simulador: opções lidas com a cultura invariante
+
+- **Data:** 2026-11-26
+- **Âmbito:** especificação 003 (F4b, simulador). Sem AC novos e sem mudança a D1–D10. Ramo `fix/003-cultura-invariante`, a partir da `main` (`45ad861`).
+- **Decisão do Diogo (2026-11-26):** a linha de comandos do simulador lê os números com a cultura invariante. Resolve o `TODO(Diogo)` da entrada «F4b: fecho dos achados da revisão».
+- **Feito:**
+  - `InvariantParsers`: *parsers* com a cultura invariante para as opções `int`, `double` e `TimeSpan`. As 11 opções numéricas e de duração do `SimulatorCommand` usam-nos como `CustomParser`. O System.CommandLine só chama o `CustomParser` quando a opção vem na linha de comandos, por isso os valores por omissão não mudam.
+  - As durações (`--peak-at`, `--peak-duration`, `--duration`, `--flush-interval`) também entram, embora a decisão falasse de números: o `TimeSpan` depende da cultura no separador das frações de segundo (`00:00:00.5`).
+  - Um número com vírgula passa a ser um erro de *parse* (código 1), com uma mensagem que diz a opção e o formato esperado.
+  - Testes novos, em cultura pt-PT: um que lê ponto decimal, *seed* negativa e durações com frações, incluindo as opções repetidas; e três casos com vírgula, que dão erro de *parse*.
+- **Verificação:**
+  - `dotnet build`: 0 avisos, 0 erros;
+  - `dotnet format --verify-no-changes`: limpo;
+  - `dotnet test`: 465 testes passaram em duas corridas seguidas (eram 461);
+  - mutação: sem o *parser* no `--mean-interval`, os dois testes em pt-PT falham;
+  - manual nesta máquina (pt-PT): `--mean-interval 0,5` dá o erro de *parse*; `--mean-interval 0.5` é aceite e o simulador segue para a verificação do mapeamento.
+- **Problemas:**
+  - A primeira compilação falhou: o C# não inferiu o tipo genérico a partir de um grupo de métodos com parâmetro `out` (CS0411). Ficou explícito (`Single<TimeSpan>`).
+  - O `GetValue<TimeSpan[]>` é anotado como anulável, e com os avisos tratados como erros os testes não compilavam (CS8604). Ficou `?? []`.
+- **Decisões:**
+  - Uma linha de comandos com vírgula deixa de funcionar numa máquina em português. É intencional: o mesmo texto passa a significar o mesmo valor em qualquer máquina, como pedem as medições da F12.
+  - Continuam em aberto: o limite de 86 400 s do `--mean-interval` e as secções da tese do ADR 0009.
+- ***Commits:*** `4bda043` (código e testes); esta entrada fica no *commit* seguinte.
