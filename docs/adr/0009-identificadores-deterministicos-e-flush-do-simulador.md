@@ -26,7 +26,7 @@ O simulador (`tools/SensorSimulator`) é a fonte de carga das experiências da F
   - ficam os 16 primeiros *bytes* do resumo, com os bits de versão (8) e de variante (10) acertados.
 
   A mesma *seed* com o mesmo relógio dá a mesma sequência (AC-20). Duas execuções começadas em instantes diferentes não colidem no registo.
-- **O *flush* por tempo conta desde o evento mais antigo do lote.** O `BatchAccumulator` guarda o instante em que entrou o primeiro evento do lote e entrega o lote quando passa o `--flush-interval` desde esse instante, ou quando chega ao `--batch-size`, o que acontecer primeiro. Nenhum evento espera no *gateway* mais do que o `--flush-interval`. O instante é passado por quem chama, por isso a regra é testada com o relógio falso (AC-23) e, desde o fecho da revisão, também na corrida em tempo real (`Gateway_LowRate_FlushesByTimeBeforeBatchIsFull_AC23`).
+- **O *flush* por tempo conta desde o evento mais antigo do lote.** O `BatchAccumulator` guarda o instante em que entrou o primeiro evento do lote e entrega o lote quando passa o `--flush-interval` desde esse instante, ou quando chega ao `--batch-size`, o que acontecer primeiro. Nenhum evento fica no acumulador mais do que o `--flush-interval`. Depois disso, o lote pode ainda esperar na fila do *gateway* atrás de um envio que está a repetir depois de um 503, porque cada *gateway* envia um lote de cada vez. O instante é passado por quem chama. Por isso, a contagem desde o evento mais antigo é testada com o relógio falso (AC-23). Desde o fecho da revisão, um teste em tempo real (`Gateway_LowRate_FlushesByTimeBeforeBatchIsFull_AC23`) confirma também que o `GatewayRunner` envia lotes por tempo antes de terem 500 eventos.
 
 ## Alternativas consideradas
 
@@ -42,7 +42,7 @@ O simulador (`tools/SensorSimulator`) é a fonte de carga das experiências da F
 - Repetir uma execução com a mesma *seed* noutro instante gera eventos novos, que a Api aceita. Para reproduzir exatamente uma sequência, é preciso fixar também o relógio, como fazem os testes do AC-20.
 - O instante de arranque aparece no *log* do simulador (`Emitting for … from {Start:O}`). Com a *seed* e o mapeamento, permite reconstruir os identificadores de uma corrida.
 - O `eventId` não tem significado temporal (não é um UUID versão 7). A ordem temporal vem do `timestamp` do evento.
-- A espera máxima de um evento no *gateway* é o `--flush-interval`. As métricas de ingestão da Api não incluem essa espera.
+- A espera de um evento no acumulador está limitada pelo `--flush-interval`; a fila de envio e as repetições depois de um 503 acrescentam-se a essa espera. As métricas de ingestão da Api não incluem nenhuma das duas.
 
 ## Referências
 
