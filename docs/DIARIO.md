@@ -714,3 +714,19 @@ Formato de cada entrada:
   - Uma linha de comandos com vírgula deixa de funcionar numa máquina em português. É intencional: o mesmo texto passa a significar o mesmo valor em qualquer máquina, como pedem as medições da F12.
   - Continuam em aberto: o limite de 86 400 s do `--mean-interval` e as secções da tese do ADR 0009.
 - ***Commits:*** `4bda043` (código e testes); esta entrada fica no *commit* seguinte.
+
+## Simulador: integração da cultura invariante na `main`
+
+- **Data:** 2026-11-26
+- **Feito:**
+  - *Push* do ramo `fix/003-cultura-invariante` (2 *commits*) e abertura do [PR #7](https://github.com/diogonunes2798/SmartParking.Hybrid/pull/7) a pedido do Diogo. A descrição inclui o problema, a alteração às 11 opções, a verificação e os dois `TODO(Diogo)` em aberto.
+  - *Merge* pedido pelo Diogo, com *merge commit* (`2601999`). O GitHub indicava o PR como integrável e sem conflitos, e o `HEAD` do PR era o mesmo da cópia local (`c67a7fa`, verificado com `--match-head-commit`).
+  - Linha do RF-01 da RASTREABILIDADE atualizada com o PR #7.
+- **Problemas:**
+  - O repositório continua sem integração contínua, por isso o PR não teve verificações automáticas. A garantia são os resultados locais registados na descrição: 465 testes em duas corridas seguidas, *build* e *format* limpos.
+  - Não houve revisão independente desta alteração: o Diogo escolheu abrir o PR diretamente.
+  - Depois de mudar para a `main`, o `dotnet format --verify-no-changes` continuou limpo.
+- **Decisões:**
+  - *Merge commit* em vez de *squash*, como nos PR anteriores.
+  - Continuam em aberto: o limite de 86 400 s do `--mean-interval` e as secções da tese do ADR 0009 (`TODO(Diogo)` na entrada «F4b: fecho dos achados da revisão»).
+- ***Commits:*** `2601999` (*merge* do PR #7); registo desta entrada no *commit* seguinte.
