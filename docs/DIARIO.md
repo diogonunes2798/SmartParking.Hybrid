@@ -475,7 +475,7 @@ Formato de cada entrada:
   - A rota é `/api/ingest/occupancy-events`, porque as especificações omitem o prefixo `/api`, como nas F2 e F3.
   - O *log* de cada lote é escrito no *endpoint*, porque Application não tem pacote de *logging*; nenhuma dependência nova.
   - No modo monolítico há um `IOccupancyEventLog` provisório só para o *handler* poder ser construído, porque o *binding* dos parâmetros corre antes dos filtros.
-  - O `payload` passa a seguir I-JSON (RFC 7493), sem nomes começados por `$` nem com o carácter nulo (correção do achado 1, pedida pelo Diogo). É uma regra de esquema nova sobre o conteúdo do `payload`, e não uma mudança ao formato comum do evento. Deve ser acrescentada à especificação 003 na próxima revisão: `TODO(Diogo):` confirmar a redação.
+  - O `payload` passa a seguir I-JSON (RFC 7493), sem nomes começados por `$` nem com o carácter nulo (correção do achado 1, pedida pelo Diogo). É uma regra de esquema nova sobre o conteúdo do `payload`, e não uma mudança ao formato comum do evento. Deve ser acrescentada à especificação 003 na próxima revisão: `TODO(Diogo):` confirmar a redação. *(Resolvido a 2026-11-26: redação confirmada e acrescentada à especificação; ver «Especificação 003: regra I-JSON do `payload`».)*
 - **Revisão independente** (`code-reviewer`, só leitura, sobre `git diff main...HEAD`): não encontrou erros nas contagens, na ordem das regras, no mapeamento dos erros do `insertMany` nem no 503 com `Retry-After`. O Diogo pediu a correção dos achados 1, 2 e 3 e o reforço dos testes (2026-11-26); os restantes ficam registados. Achados:
   1. **Um `payload` aceite pelo validador podia dar 500, e voltava a dar 500 em cada reenvio.** O `BsonDocument.Parse` falha com nomes repetidos, números enormes e formas `$date`/`$oid` inválidas, e transforma as formas válidas (por exemplo, um `{"$date": …}` passava a data). **Corrigido:**
      - conversão estrutural `BsonPayload`, sem JSON estendido;
@@ -743,3 +743,15 @@ Formato de cada entrada:
 - **Problemas:** nenhum. Só muda documentação; não há código nem testes alterados.
 - **Decisões:** o simulador deixa de ter `TODO(Diogo)` em aberto. Na especificação 003 mantém-se só o da redação da regra I-JSON do `payload` (entrada da F4a), que fica para a próxima revisão da especificação.
 - ***Commits:*** esta entrada e as duas alterações acima, num só *commit* na `main`.
+
+## Especificação 003: regra I-JSON do `payload`
+
+- **Data:** 2026-11-26
+- **Decisão do Diogo (2026-11-26):** confirma a redação da regra I-JSON (RFC 7493) do `payload`, que estava pendente desde a revisão da F4a.
+- **Feito:** a especificação 003 (`docs/specs/003-ingestao.md`) passa a ter:
+  - a linha «Revisto» no cabeçalho, com a data e a origem da alteração;
+  - a regra do conteúdo do `payload` na secção do registo de eventos: nomes únicos, números num `double` finito, texto Unicode válido, nomes sem `$` inicial nem carácter nulo, em todos os níveis;
+  - a regra na lista das faltas de esquema do contrato da API (400, chave `events[i].payload`).
+- **Problemas:** nenhum. O código (`PayloadRules`) e os testes já seguiam a regra desde a correção do achado 1; só muda o documento, para que diga o que o código já faz.
+- **Decisões:** a especificação continua aprovada; a alteração é uma regra sobre o conteúdo do `payload`, não um AC novo nem uma mudança ao formato comum do evento. Deixa de haver `TODO(Diogo)` em aberto na especificação 003.
+- ***Commits:*** esta entrada e a alteração à especificação, num só *commit* na `main`.

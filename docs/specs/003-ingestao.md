@@ -2,6 +2,7 @@
 
 **Status:** Approved (2026-11-25)
 **Date:** 2026-11-25
+**Revisto:** 2026-11-26: regra I-JSON do `payload` (achado 1 da revisão da F4a; redação confirmada pelo Diogo)
 **Fase:** F4 · **Secção da tese:** 5.3, 5.5, 5.9.4 · **Requisitos:** UC-01; RF-01 (e preparação do UC-05) · **Depende de:** F2 (spec 001, registo dos sensores)
 
 ## Problem
@@ -82,7 +83,7 @@ A tolerância da regra 8 é configurável (`Ingestion:FutureTolerance`, por omis
 - Coleção normal `occupancy_events`, com `_id = eventId`. A unicidade vem do índice obrigatório do `_id`, sem índice extra. Não é uma coleção *time-series*, porque essas coleções não permitem índices únicos.
 - `eventId` tem de ser um UUID; caso contrário, 400.
 - Contexto do lugar (ronda 4): o documento guarda também o `facilityId` e o `zoneId` do lugar no momento da ingestão, já lidos na consulta de validação. A F5 e a F7 agregam por parque e por zona sem voltar ao PostgreSQL, e o histórico não muda se o lugar mudar de zona depois.
-- `payload` (ronda 4): objeto JSON opcional, guardado como subdocumento BSON tal como chega, até 4 KB por evento (medidos no JSON do `payload` em UTF-8; acima disso, 400). Os campos desconhecidos no topo do evento são ignorados e não se gravam: o lugar da extensão é o `payload` (UC-05).
+- `payload` (ronda 4): objeto JSON opcional, guardado como subdocumento BSON tal como chega, até 4 KB por evento (medidos no JSON do `payload` em UTF-8; acima disso, 400). Regra do conteúdo (revisão de 2026-11-26): como é guardado tal como chega, o `payload` tem de ser JSON portável, I-JSON (RFC 7493): nomes de membros sem repetições, números que cabem num `double` finito e texto Unicode válido, sem *surrogates* isolados. Os nomes dos membros também não podem começar por `$` nem conter o carácter nulo, porque o MongoDB os reserva. A regra aplica-se a todos os níveis do objeto. É uma regra sobre o conteúdo do `payload`, não uma mudança ao formato comum do evento. Os campos desconhecidos no topo do evento são ignorados e não se gravam: o lugar da extensão é o `payload` (UC-05).
 - Durabilidade (ronda 4): *write concern* `majority` com *journal*. Só se responde ao sensor depois de o evento estar no *journal* da maioria do *replica set* (RNF-03). Localmente o *replica set* tem um nó; o custo mede-se na F12.
 - Índices (ronda 6): só o `_id` na F4. Cada fase cria o índice da consulta que introduz (F5/F6 por lugar e tempo, F7 por zona e período, F10 o TTL) e regista-o na sua especificação, para que o custo de escrita de cada índice fique atribuído à fase que o justifica.
 - Sequência (ronda 6): a F4 não verifica a sequência dos eventos de um lugar (`Occupied` seguido de `Occupied`, ou um evento mais antigo do que o último). O registo guarda os factos como chegam (D3); a F5 decide o estado atual pelo `timestamp` mais recente.
@@ -98,7 +99,7 @@ A tolerância da regra 8 é configurável (`Ingestion:FutureTolerance`, por omis
 - Os eventos chegam sempre em lote. Um evento isolado é um lote de 1 (ronda 2).
 - `issues[]` (ronda 7) lista só os eventos não aceites, pela ordem do pedido: `{ index, eventId, status, code? }`, com `status` igual a `duplicate` ou `rejected` e `code` da tabela de regras quando o evento é rejeitado. Um lote todo rejeitado continua a ser 200.
 - Lote misto (ronda 2):
-  - uma falta de esquema dá 400 com `ValidationProblemDetails` para o lote todo, e nada fica gravado. As chaves de `errors` indicam a posição (`events[3].eventId`). Contam como falta de esquema: campo obrigatório ausente (RF-01), lote vazio ou acima de 500, `eventId` que não é UUID, `type` fora de `Occupied`/`Freed`, `timestamp` sem fuso, `payload` que não é objeto ou acima de 4 KB;
+  - uma falta de esquema dá 400 com `ValidationProblemDetails` para o lote todo, e nada fica gravado. As chaves de `errors` indicam a posição (`events[3].eventId`). Contam como falta de esquema: campo obrigatório ausente (RF-01), lote vazio ou acima de 500, `eventId` que não é UUID, `type` fora de `Occupied`/`Freed`, `timestamp` sem fuso, `payload` que não é objeto, acima de 4 KB ou fora da regra I-JSON (chave `events[i].payload`);
   - uma inconsistência com o registo dá 200 com o evento em `issues[]`. Um sensor mal registado não bloqueia os eventos dos outros sensores do mesmo *gateway*.
 - 503 (ronda 5): ProblemDetails com o cabeçalho `Retry-After`.
 - 501 (ronda 5): ProblemDetails a indicar que a ingestão no modo monolítico chega na F9.
