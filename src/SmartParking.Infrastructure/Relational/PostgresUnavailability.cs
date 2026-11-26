@@ -3,20 +3,22 @@ using Npgsql;
 namespace SmartParking.Infrastructure.Relational;
 
 /// <summary>
-/// Recognises a PostgreSQL failure on a read (spec 003, AC-13). The ways it can arrive:
+/// Recognises a PostgreSQL failure worth retrying on a read (spec 003, AC-13). Npgsql marks those as transient:
 /// <list type="bullet">
-/// <item>an <see cref="NpgsqlException"/>, including a <see cref="PostgresException"/> from the server;</item>
-/// <item>EF Core's «transient failure» <see cref="InvalidOperationException"/> with the <see cref="NpgsqlException"/> inside;</item>
-/// <item>a <see cref="TimeoutException"/>.</item>
+/// <item>connection and I/O errors;</item>
+/// <item>timeouts;</item>
+/// <item>server states such as <c>too_many_connections</c> or <c>cannot_connect_now</c>.</item>
 /// </list>
-/// Anything else is a programming error and is left to the global handler (500).
+/// They can arrive bare, or inside EF Core's «transient failure» <see cref="InvalidOperationException"/>.
+/// A non-transient error (a missing grant, a missing table, a failed login) is a configuration problem: it is left to
+/// the global handler (500), so that a gateway does not retry it forever (review of F4a, finding 2).
 /// </summary>
 internal static class PostgresUnavailability
 {
     public static bool IsUnavailable(Exception exception) => exception switch
     {
-        NpgsqlException or TimeoutException => true,
-        InvalidOperationException { InnerException: NpgsqlException or TimeoutException } => true,
+        NpgsqlException { IsTransient: true } or TimeoutException => true,
+        InvalidOperationException { InnerException: NpgsqlException { IsTransient: true } or TimeoutException } => true,
         _ => false,
     };
 }

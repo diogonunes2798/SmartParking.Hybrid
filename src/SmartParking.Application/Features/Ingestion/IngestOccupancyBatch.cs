@@ -49,7 +49,6 @@ public static class IngestOccupancyBatch
         {
             ArgumentNullException.ThrowIfNull(command);
 
-            metrics.BatchReceived(command.Events.Count);
             var receivedAt = clock.GetUtcNow();
             var issues = new SortedList<int, Issue>();
 
@@ -88,7 +87,6 @@ public static class IngestOccupancyBatch
                 if (RejectionCode(item, sensor, latestAccepted) is { } code)
                 {
                     issues.Add(index, new Issue(index, item.EventId, RejectedStatus, code));
-                    metrics.EventRejected(code);
                     continue;
                 }
 
@@ -126,10 +124,25 @@ public static class IngestOccupancyBatch
 
             var acceptedCount = accepted.Count - alreadyLogged;
             var duplicates = command.Events.Count - candidates.Count + alreadyLogged;
-            metrics.EventsAccepted(acceptedCount);
-            metrics.EventsDuplicated(duplicates);
+            var outcome = new Outcome(acceptedCount, duplicates, rejected, [.. issues.Values]);
+            RecordOutcome(command.Events.Count, outcome);
+            return outcome;
+        }
 
-            return new Outcome(acceptedCount, duplicates, rejected, [.. issues.Values]);
+        /// <summary>
+        /// Outcome counters and the batch size are recorded only for a batch that is answered with 200. A batch that
+        /// ends in 503 is sent again by the gateway, and counting it twice would distort the F12 measurements
+        /// (review of F4a, finding 3). The durations are recorded on every attempt, because they measure the stores.
+        /// </summary>
+        private void RecordOutcome(int batchSize, Outcome outcome)
+        {
+            metrics.BatchReceived(batchSize);
+            metrics.EventsAccepted(outcome.Accepted);
+            metrics.EventsDuplicated(outcome.Duplicates);
+            foreach (var issue in outcome.Issues.Where(issue => issue.Code is not null))
+            {
+                metrics.EventRejected(issue.Code!);
+            }
         }
 
         /// <summary>Rules 1 to 8, in the spec's order: the first that fails gives the code (AC-8).</summary>

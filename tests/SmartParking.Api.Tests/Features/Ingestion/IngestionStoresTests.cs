@@ -5,6 +5,8 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using MongoDB.Driver;
+using Npgsql;
+using SmartParking.Application.Abstractions.Documents;
 using SmartParking.Api.Tests.Fixtures;
 using SmartParking.Infrastructure;
 using SmartParking.Infrastructure.Documents;
@@ -101,6 +103,53 @@ public sealed class IngestionStoresTests(ApiFixture fixture)
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
         Assert.Equal(TimeSpan.FromSeconds(1), response.Headers.RetryAfter?.Delta);
         Assert.Empty(await FindAsync(Mongo, events.Select(IdOf), cancellationToken));
+    }
+
+    [Fact]
+    public async Task Ingest_PostgresLoginRejected_Returns500WithoutRetryAfter_AC13()
+    {
+        // Arrange: a configuration fault (wrong password, SQLSTATE 28P01) is not transient, so the gateway must not be
+        // told to retry it (review of F4a, finding 2).
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var registry = fixture.Hybrid.CreateClient();
+        var site = await CreateSiteAsync(registry, 1, cancellationToken);
+        var settings = fixture.Databases.Settings(PersistenceMode.Hybrid);
+        settings["ConnectionStrings:Postgres"] = new NpgsqlConnectionStringBuilder(fixture.Databases.AppConnectionString) { Password = "wrong" }.ConnectionString;
+        await using var factory = ApiFixture.CreateFactory(settings);
+        using var client = factory.CreateClient();
+        var occupancyEvent = Event(site.Spots[0], Past);
+
+        // Act
+        using var response = await PostAsync(client, Batch(occupancyEvent), cancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Null(response.Headers.RetryAfter);
+        Assert.Empty(await FindAsync(Mongo, [IdOf(occupancyEvent)], cancellationToken));
+    }
+
+    [Fact]
+    public async Task Ingest_EventLogUnavailable_RecordsNoOutcomeMetrics_AC17()
+    {
+        // Arrange: the batch has a rejected and a valid event and ends in 503, so the gateway will send it again.
+        // Counting it now would count its events twice (review of F4a, finding 3).
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var factory = fixture.CreateFactory(configureServices: services =>
+            services.AddSingleton<IOccupancyEventLog, UnavailableEventLog>());
+        using var client = factory.CreateClient();
+        var site = await CreateSiteAsync(client, 1, cancellationToken);
+        using var recorder = new IngestionMeterRecorder(factory.Services);
+        var valid = Event(site.Spots[0], Past);
+        var unknown = Event(ConfigurationApi.NewHardwareId(), site.Spots[0].SpotId, Past);
+
+        // Act
+        using var response = await PostAsync(client, Batch(unknown, valid), cancellationToken);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var recorded = recorder.Snapshot();
+        Assert.DoesNotContain(recorded, m => m.Instrument is "ingestion.events" or "ingestion.batch.size");
+        Assert.Single(recorded, m => m.Instrument == "ingestion.append.duration");
     }
 
     [Fact]
