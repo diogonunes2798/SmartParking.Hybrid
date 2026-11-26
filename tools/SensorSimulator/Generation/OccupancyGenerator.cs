@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using SmartParking.SensorSimulator.Provisioning;
+using static System.FormattableString;
 
 namespace SmartParking.SensorSimulator.Generation;
 
@@ -95,17 +96,19 @@ internal static class OccupancyGenerator
         }
     }
 
+    // The hashed text is formatted with the invariant culture, so a negative seed gives the same spot seeds and eventIds
+    // on every machine (review of F4b, finding 6).
     private static int SpotSeed(int seed, string hardwareId)
     {
         Span<byte> hash = stackalloc byte[SHA256.HashSizeInBytes];
-        SHA256.HashData(Encoding.UTF8.GetBytes($"{seed}|{hardwareId}"), hash);
+        SHA256.HashData(Encoding.UTF8.GetBytes(Invariant($"{seed}|{hardwareId}")), hash);
         return BinaryPrimitives.ReadInt32BigEndian(hash);
     }
 
     private static Guid EventId(int seed, DateTimeOffset origin, string hardwareId, long sequence)
     {
         Span<byte> hash = stackalloc byte[SHA256.HashSizeInBytes];
-        SHA256.HashData(Encoding.UTF8.GetBytes($"{seed}|{origin.UtcTicks}|{hardwareId}|{sequence}"), hash);
+        SHA256.HashData(Encoding.UTF8.GetBytes(Invariant($"{seed}|{origin.UtcTicks}|{hardwareId}|{sequence}")), hash);
 
         var bytes = hash[..16];
         bytes[6] = (byte)((bytes[6] & 0x0F) | 0x80); // version 8 (RFC 9562, custom)

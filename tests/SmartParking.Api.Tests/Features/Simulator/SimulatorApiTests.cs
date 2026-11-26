@@ -23,6 +23,13 @@ namespace SmartParking.Api.Tests.Features.Simulator;
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class SimulatorApiTests(ApiFixture fixture)
 {
+    /// <summary>
+    /// Tolerance of the AC-24 wait check: the default Windows timer tick (15.625 ms). <c>Task.Delay</c> follows the
+    /// system tick count, which can run up to one tick ahead of <see cref="Stopwatch"/>. A correctness margin, not a
+    /// performance value.
+    /// </summary>
+    private static readonly TimeSpan TimerResolution = TimeSpan.FromMilliseconds(16);
+
     private string Mongo => fixture.Databases.Mongo.GetConnectionString();
 
     [Fact]
@@ -133,10 +140,36 @@ public sealed class SimulatorApiTests(ApiFixture fixture)
         Assert.Equal(TimeSpan.FromSeconds(1), requests[0].RetryAfter);
         Assert.Equal(batch.Select(item => item.EventId), requests[0].EventIds);
         Assert.Equal(requests[0].EventIds, requests[1].EventIds);
-        Assert.True(Stopwatch.GetElapsedTime(requests[0].Timestamp, requests[1].Timestamp) >= requests[0].RetryAfter);
+        // The wait counts from the arrival of the 503, not from the first request (review of F4b, finding 3).
+        var waited = Stopwatch.GetElapsedTime(requests[0].AnsweredAt, requests[1].Timestamp);
+        Assert.True(waited >= requests[0].RetryAfter - TimerResolution, $"Resent after {waited}, Retry-After {requests[0].RetryAfter}.");
 
         var stored = await FindAsync(Mongo, batch.Select(item => item.EventId), cancellationToken);
         Assert.Equal(batch.Count, stored.Count);
+    }
+
+    [Fact]
+    public async Task Gateway_OkWithUnreadableBody_KeepsSendingAndCountsBatchesAsNotDelivered_AC23()
+    {
+        // Arrange: every 200 arrives with truncated JSON (review of F4b, finding 1).
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var api = fixture.Hybrid;
+        using var client = api.CreateClient();
+        var site = await CreateSiteAsync(client, 5, cancellationToken);
+        var corrupter = new TruncatedOkBodyHandler();
+        await using var services = SimulatorHost.Create(api, corrupter);
+        var generator = new GeneratorSettings(42, TimeSpan.FromMilliseconds(50), 10, []);
+        var settings = SenderSettings.Default with { BatchSize = 20 };
+
+        // Act
+        var summary = await services.GetRequiredService<GatewayRunner>().RunAsync(
+            SimulatorMaps.FromSite(site), generator, settings, TimeSpan.FromSeconds(1), cancellationToken);
+
+        // Assert: the run ends with its summary, every batch was sent, and none is counted as delivered.
+        Assert.True(summary.Batches > 1);
+        Assert.Equal(summary.Batches, corrupter.Requests);
+        Assert.Equal(summary.Generated, summary.NotDeliveredEvents);
+        Assert.Equal(0, summary.Accepted);
     }
 
     [Fact]

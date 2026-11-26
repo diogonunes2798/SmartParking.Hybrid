@@ -14,7 +14,8 @@ internal sealed class RecordingHandler : DelegatingHandler
 {
     private readonly ConcurrentQueue<Sent> requests = new();
 
-    public sealed record Sent(IReadOnlyList<Guid> EventIds, HttpStatusCode StatusCode, TimeSpan? RetryAfter, long Timestamp);
+    /// <summary><see cref="Timestamp"/> is taken when the request leaves, <see cref="AnsweredAt"/> when its answer arrives.</summary>
+    public sealed record Sent(IReadOnlyList<Guid> EventIds, HttpStatusCode StatusCode, TimeSpan? RetryAfter, long Timestamp, long AnsweredAt);
 
     public IReadOnlyList<Sent> Requests => [.. requests];
 
@@ -23,12 +24,13 @@ internal sealed class RecordingHandler : DelegatingHandler
         var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
         var timestamp = Stopwatch.GetTimestamp();
         var response = await base.SendAsync(request, cancellationToken);
+        var answeredAt = Stopwatch.GetTimestamp();
 
         if (body is not null && request.RequestUri?.AbsolutePath == IngestionApi.Route)
         {
             using var document = JsonDocument.Parse(body);
             Guid[] ids = [.. document.RootElement.GetProperty("events").EnumerateArray().Select(item => item.GetProperty("eventId").GetGuid())];
-            requests.Enqueue(new Sent(ids, response.StatusCode, response.Headers.RetryAfter?.Delta, timestamp));
+            requests.Enqueue(new Sent(ids, response.StatusCode, response.Headers.RetryAfter?.Delta, timestamp, answeredAt));
         }
 
         return response;

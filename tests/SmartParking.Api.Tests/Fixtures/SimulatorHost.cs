@@ -6,12 +6,12 @@ namespace SmartParking.Api.Tests.Fixtures;
 
 /// <summary>
 /// The simulator's services (spec 003, F4b) wired to a test Api: the same <c>AddSensorSimulator</c> as the tool, with
-/// only the primary handler of the named client replaced by the test server's, and optionally a
-/// <see cref="RecordingHandler"/> in front of it.
+/// only the primary handler of the named client replaced by the test server's, and optionally one handler in front of
+/// it (<see cref="RecordingHandler"/>, <see cref="TruncatedOkBodyHandler"/>).
 /// </summary>
 internal static class SimulatorHost
 {
-    public static ServiceProvider Create(ConfiguredFactory<Program> api, RecordingHandler? recorder = null)
+    public static ServiceProvider Create(ConfiguredFactory<Program> api, DelegatingHandler? recorder = null)
     {
         ArgumentNullException.ThrowIfNull(api);
 
@@ -23,7 +23,7 @@ internal static class SimulatorHost
     }
 
     /// <summary>Points the simulator's named client at the test server; also given to <c>SimulatorCommand.Create</c>.</summary>
-    public static void UseTestServer(IServiceCollection services, ConfiguredFactory<Program> api, RecordingHandler? recorder = null)
+    public static void UseTestServer(IServiceCollection services, ConfiguredFactory<Program> api, DelegatingHandler? recorder = null)
     {
         ArgumentNullException.ThrowIfNull(api);
 

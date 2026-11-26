@@ -67,10 +67,36 @@ internal sealed partial class IngestionSender(IHttpClientFactory httpClientFacto
                     return new SendOutcome(batch.Count, response.StatusCode, 0, 0, 0, retries);
                 }
 
-                var result = await response.Content.ReadFromJsonAsync<OccupancyBatchResponse>(ApiWire.Json, cancellationToken);
-                return new SendOutcome(
-                    batch.Count, response.StatusCode, result?.Accepted ?? 0, result?.Duplicates ?? 0, result?.Rejected ?? 0, retries);
+                OccupancyBatchResponse? result;
+                try
+                {
+                    result = await response.Content.ReadFromJsonAsync<OccupancyBatchResponse>(ApiWire.Json, cancellationToken);
+                }
+                catch (JsonException exception)
+                {
+                    return Unreadable(exception);
+                }
+                catch (HttpRequestException exception)
+                {
+                    return Unreadable(exception);
+                }
+                catch (IOException exception)
+                {
+                    return Unreadable(exception);
+                }
+
+                return result is null
+                    ? Unreadable(null)
+                    : new SendOutcome(batch.Count, response.StatusCode, result.Accepted, result.Duplicates, result.Rejected, retries);
             }
+        }
+
+        // A 200 whose counts cannot be read: the batch may be stored, but nothing confirms it, so it is counted as not
+        // delivered instead of faulting the gateway (review of F4b, finding 1).
+        SendOutcome Unreadable(Exception? exception)
+        {
+            LogUnreadableAnswer(logger, exception, batch.Count);
+            return new SendOutcome(batch.Count, null, 0, 0, 0, retries);
         }
     }
 
@@ -92,4 +118,8 @@ internal sealed partial class IngestionSender(IHttpClientFactory httpClientFacto
 
     [LoggerMessage(EventId = 3, Level = LogLevel.Warning, Message = "Batch of {Count} events not delivered: transport failure")]
     private static partial void LogTransportFailure(ILogger logger, Exception exception, int count);
+
+    [LoggerMessage(EventId = 4, Level = LogLevel.Warning,
+        Message = "Batch of {Count} events got 200 with an unreadable body; counted as not delivered")]
+    private static partial void LogUnreadableAnswer(ILogger logger, Exception? exception, int count);
 }

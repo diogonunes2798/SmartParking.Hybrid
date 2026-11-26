@@ -1,3 +1,4 @@
+using System.Globalization;
 using SmartParking.Api.Tests.Fixtures;
 using SmartParking.SensorSimulator.Generation;
 
@@ -49,6 +50,36 @@ public sealed class OccupancyGeneratorTests
         // Assert: the same intervals and types relative to the start, other ids.
         Assert.Equal(first.Select(item => (item.Type, item.Timestamp - start)), later.Select(item => (item.Type, item.Timestamp - start.AddHours(1))));
         Assert.Empty(first.Select(item => item.EventId).Intersect(later.Select(item => item.EventId)));
+    }
+
+    [Fact]
+    public void Generate_NegativeSeedUnderCultureWithOtherMinusSign_ProducesTheInvariantSequence_AC20()
+    {
+        // Arrange: a culture whose negative sign is U+2212, as some ICU cultures have (review of F4b, finding 6).
+        var map = SimulatorMaps.Synthetic(10);
+        var settings = new GeneratorSettings(-1, TimeSpan.FromSeconds(60), 10, []);
+        var start = Clock.GetUtcNow();
+        var window = TimeSpan.FromMinutes(30);
+        var culture = (CultureInfo)CultureInfo.InvariantCulture.Clone();
+        culture.NumberFormat.NegativeSign = "−";
+        var original = CultureInfo.CurrentCulture;
+
+        // Act
+        var invariant = Run(map, settings, start, window);
+        List<SimulatedEvent> other;
+        try
+        {
+            CultureInfo.CurrentCulture = culture;
+            other = Run(map, settings, start, window);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
+
+        // Assert
+        Assert.NotEmpty(invariant);
+        Assert.Equal(invariant, other);
     }
 
     [Fact]
