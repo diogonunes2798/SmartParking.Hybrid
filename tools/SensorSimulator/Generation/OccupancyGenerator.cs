@@ -21,7 +21,10 @@ namespace SmartParking.SensorSimulator.Generation;
 /// the spot's sequence number: the same seed and clock give the same ids (AC-20), and two runs started at different
 /// instants do not collide in the idempotent event log.</item>
 /// </list>
-/// The sequence is lazy, infinite and ordered by timestamp; callers stop it with <c>TakeWhile</c>.
+/// The sequence is lazy and infinite; callers stop it with <c>TakeWhile</c>. Each spot's timestamps are strictly
+/// increasing, but the sequence as a whole is only nearly ordered: when two draws of one spot fall in the same
+/// millisecond, the second is pushed 1 ms forward and can come after the next event of another spot (review of F4b,
+/// finding 9). The emission order follows the draws, not the pushed timestamps.
 /// </summary>
 internal static class OccupancyGenerator
 {
