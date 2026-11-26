@@ -597,6 +597,12 @@ Formato de cada entrada:
   - Especificação 003 marcada no índice como implementada e integrada (F4a e F4b); linha do RF-01 da RASTREABILIDADE atualizada.
 - **Problemas:**
   - O repositório continua sem integração contínua, por isso o PR não teve verificações automáticas. A garantia são os resultados locais registados na descrição: 448 testes em duas corridas seguidas, build e format limpos.
+  - Depois do *merge*, o *hook* de *pre-commit* recusou o *commit* desta entrada: o `dotnet format` falhou em `GatewayRunner.cs`. A causa:
+    - no ramo, o ficheiro estava em CRLF, como o Write o criou no Windows, e o formato passava;
+    - ao mudar para a `main`, o Git reescreveu-o em LF (`.gitattributes` com `eol=lf`);
+    - sem `.editorconfig`, o `dotnet format` no Windows pede CRLF nas linhas de um comentário metido numa lista de argumentos.
+
+    Correção: o valor passou para uma variável local, com o comentário por cima, sem mudar o comportamento. O format ficou limpo e os 16 testes do simulador passaram. É um *commit* `style` próprio na `main`. Fica a observação de que a falta de `.editorconfig` torna o resultado do `dotnet format` dependente dos finais de linha da cópia local.
 - **Decisões:**
   - *Merge commit* em vez de *squash*, para que os *commits* da F4b referidos neste diário continuem a existir na `main`.
   - O ramo `feat/003-simulador` foi apagado no `origin` e localmente, a pedido do Diogo, depois de se confirmar que estava integrado na `main` (`git merge-base --is-ancestor`).
