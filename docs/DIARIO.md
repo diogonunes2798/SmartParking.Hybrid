@@ -405,3 +405,90 @@ Formato de cada entrada:
   - *Merge commit* em vez de *squash*: os *commits* da F3a e da F3b referidos neste diário continuam a existir na `main`.
   - O ramo `feat/002-sessoes-pagamentos` foi apagado no `origin` e localmente, a pedido do Diogo, depois de se confirmar que estava integrado na `main` (`git merge-base --is-ancestor`), como na F1 e na F2. A cópia de trabalho principal passou para a `main`.
 - ***Commits:*** `b1d7e6e` (*merge* do PR #3); registo desta entrada no commit seguinte.
+
+## F4a: ingestão de eventos de ocupação (especificação 003)
+
+- **Data:** 2026-11-25 a 2026-11-26
+- **Feito:**
+  - Plano aprovado pelo Diogo na sessão (UC-01, RF-01; prepara o UC-05; RNF-03), no ramo `feat/003-ingestao`. Cobre só a F4a (AC-1 a AC-18); o simulador (F4b, AC-19 a AC-24) fica para outra sessão, como a especificação prevê.
+  - Domain: `OccupancyEvent`, um facto imutável que não é raiz de agregado, e `OccupancyEventType`.
+  - Application:
+    - porta só por acréscimo `IOccupancyEventLog` (`AppendAsync`);
+    - porta de leitura `ISensorRegistryReader`;
+    - comando `IngestOccupancyBatch`, que retira os repetidos dentro do lote, faz uma consulta ao registo por lote, aplica as regras 1 a 8 pela ordem da especificação e faz uma escrita por lote;
+    - `ErrorType.Unavailable` (503);
+    - `IngestionMetrics`, sobre o `Meter` `SmartParking.Ingestion`.
+  - Infrastructure:
+    - `SensorRegistryReader`: consulta compilada com `AsNoTracking` e `= ANY`;
+    - `MongoOccupancyEventLog`: `insertMany` sem ordem; o E11000 conta como duplicado e as outras falhas dão 503;
+    - coleção `occupancy_events` com `_id = eventId` e *write concern* `majority` com *journal*;
+    - `BsonPayload`, conversão estrutural do `payload`;
+    - opções `Ingestion:*` e `Mongo:Database`;
+    - no modo monolítico, um *log* provisório que nunca é chamado ([ADR 0008](adr/0008-registo-de-eventos-de-ocupacao.md)).
+  - Api: `POST /api/ingest/occupancy-events`:
+    - o filtro de modo vem primeiro e dá 501 no monolítico;
+    - FluentValidation com chaves `events[i].campo`;
+    - 200 com `{ accepted, duplicates, rejected, issues }`;
+    - 503 com `Retry-After`;
+    - uma linha de *log* `Information` por lote e os rejeitados em `Debug`.
+  - Testes de AC-1 a AC-18:
+    - integração com PostgreSQL e MongoDB reais (Testcontainers);
+    - o AC-12 usa um MongoDB próprio, parado e arrancado de novo na mesma porta;
+    - o AC-15 é uma regra de arquitetura que lê o IL da subcamada `Documents/` com Mono.Cecil (dependência do NetArchTest; sem pacote novo);
+    - o AC-17 usa um `MeterListener` da BCL;
+    - o AC-18 tem um runner de ficheiros `.http` que envia os pedidos à Api de teste e compara o estado com `# @expect` (ficheiro novo `tests/http/ingest.http`).
+  - Contagem de testes:
+    - antes da revisão: 422 a passar em duas corridas seguidas (385 antes da F4a);
+    - depois das correções da revisão: 431 a passar em duas corridas seguidas.
+  - Testes de mutação, todos detetados:
+    - uma chamada `DeleteOneAsync` em `Documents/` faz falhar o AC-15;
+    - sem a remoção dos repetidos no lote, o AC-5 falha;
+    - um `@expect` errado no `ingest.http` faz falhar o AC-18;
+    - desfazer as três correções da revisão faz falhar oito testes (ver «Revisão independente»).
+  - Verificação manual contra o `compose.yaml`, com a Api como `smartparking_api`:
+    - o primeiro envio deu `accepted: 1`;
+    - o mesmo lote outra vez deu `duplicates: 1`, e ficou um só documento com esse `_id`;
+    - um evento sem `timestamp` deu 400;
+    - no `mongosh`, o documento tem UUID padrão nos identificadores, as datas em UTC e o `payload` com o campo novo `temperature`; o único índice é `_id_`.
+  - Roslyn: 0 diagnósticos. O `detect_antipatterns` só assinalou os métodos de teste (sem `CancellationToken`, que vem do `TestContext`).
+  - Documentação: ADR 0008 e o índice; RASTREABILIDADE (linha do RF-01 na matriz).
+- **Problemas:**
+  - A primeira execução manual da Api deu 500 em `POST /api/facilities`: o `appsettings.json` não tem palavras-passe e a Api arrancou sem as variáveis `ConnectionStrings__*`. Repetiu-se com as cadeias de ligação montadas a partir do `.env` local, só no processo e sem as mostrar.
+  - Um commit falhou porque as aspas duplas dentro da mensagem quebram a passagem de argumentos do PowerShell 5.1 ao `git`. A mensagem foi reescrita sem elas.
+  - A primeira versão gravava o `payload` com `BsonDocument.Parse`, que lê JSON estendido do MongoDB. A revisão independente encontrou o problema (achado 1).
+  - Depois da mutação das três correções, a primeira bateria completa deu 8 falhas, os mesmos testes que a mutação faz falhar. A causa estava na reposição dos ficheiros:
+    - o `Copy-Item` repôs os ficheiros a partir da cópia com a data antiga;
+    - o MSBuild incremental considerou atualizados os binários compilados com a mutação;
+    - os testes correram, portanto, sobre o código mutado.
+
+    A fonte estava correta (confirmado). Atualizou-se a data dos ficheiros e recompilou-se com `--no-incremental` antes de voltar a correr os testes.
+  - A sessão foi interrompida durante as correções da revisão. As edições já feitas confirmaram-se com `git diff` antes de continuar.
+- **Decisões:**
+  - **A especificação 003 prevaleceu sobre o briefing da sessão** (decisão do Diogo, 2026-11-25). Ficaram de fora:
+    - Redis Streams entre a Api e um *worker* consumidor;
+    - resposta 202;
+    - índices `{facilityId, timestamp}`, um índice único em `eventId` e um índice `2dsphere`;
+    - normalização de câmara LPR e parquímetro.
+
+    A ingestão grava diretamente no MongoDB antes de responder (RNF-03), não publica no `IEventBus` e não toca em D2. Por isso, o critério do briefing «parar o *worker* não perde eventos» não se aplica. Justificação no ADR 0008.
+  - O leitor de validação fica em `Infrastructure/Relational/` (autorizado pelo Diogo), sem migrações nem alterações às entidades.
+  - A rota é `/api/ingest/occupancy-events`, porque as especificações omitem o prefixo `/api`, como nas F2 e F3.
+  - O *log* de cada lote é escrito no *endpoint*, porque Application não tem pacote de *logging*; nenhuma dependência nova.
+  - No modo monolítico há um `IOccupancyEventLog` provisório só para o *handler* poder ser construído, porque o *binding* dos parâmetros corre antes dos filtros.
+  - O `payload` passa a seguir I-JSON (RFC 7493), sem nomes começados por `$` nem com o carácter nulo (correção do achado 1, pedida pelo Diogo). É uma regra de esquema nova sobre o conteúdo do `payload`, e não uma mudança ao formato comum do evento. Deve ser acrescentada à especificação 003 na próxima revisão: `TODO(Diogo):` confirmar a redação.
+- **Revisão independente** (`code-reviewer`, só leitura, sobre `git diff main...HEAD`): não encontrou erros nas contagens, na ordem das regras, no mapeamento dos erros do `insertMany` nem no 503 com `Retry-After`. O Diogo pediu a correção dos achados 1, 2 e 3 e o reforço dos testes (2026-11-26); os restantes ficam registados. Achados:
+  1. **Um `payload` aceite pelo validador podia dar 500, e voltava a dar 500 em cada reenvio.** O `BsonDocument.Parse` falha com nomes repetidos, números enormes e formas `$date`/`$oid` inválidas, e transforma as formas válidas (por exemplo, um `{"$date": …}` passava a data). **Corrigido:**
+     - conversão estrutural `BsonPayload`, sem JSON estendido;
+     - regra `PayloadRules` no validador, com 400 em `events[i].payload`;
+     - testes novos para nome repetido, JSON estendido, número não finito, nome com `$` e substituto (*surrogate*) isolado, e um teste que mostra que um valor `"$date"`, nomes com ponto e um `int64` ficam gravados como chegaram.
+  2. **Qualquer `PostgresException` dava 503**, incluindo um *login* recusado ou uma tabela em falta, e um *gateway* repetiria o pedido sem fim. **Corrigido:** só `NpgsqlException { IsTransient: true }` e `TimeoutException` dão 503; um erro de configuração vai para o tratamento global (500). Teste novo com uma palavra-passe errada: 500 e sem `Retry-After`.
+  3. **As métricas de resultado contavam um lote que acabava em 503**, e esse lote volta a ser enviado. **Corrigido:** os contadores e o tamanho do lote só se registam quando a resposta é 200; as durações registam-se sempre, porque medem as bases. Teste novo com um *log* de eventos indisponível.
+  4. Um tipo JSON errado (por exemplo `"eventId": 123`) dá um 400 de *binding* sem a chave `events[i].campo`; e, no modo monolítico, um corpo mal formado dá 400 e não 501. Fica registado.
+  5. O `timestamp` exige `Z` maiúsculo ou `±hh:mm` e até 7 casas decimais: os nanossegundos (9 casas) são rejeitados, e o MongoDB guarda só milissegundos. O simulador da F4b tem de ficar dentro deste formato.
+  6. Um `"payload": null` explícito é tratado como ausente e aceite.
+  7. Um repetido no mesmo lote é `duplicate` mesmo quando o primeiro foi rejeitado; nesse caso nada fica gravado com esse `eventId`. Está de acordo com a especificação (o `eventId` decide sozinho).
+  - Testes reforçados a pedido do Diogo:
+    - o AC-3 verifica a chave de `errors` em cada caso e aceita um `payload` de exatamente 4 096 *bytes*;
+    - o intercetor do AC-11 conta também os comandos sem leitura e os escalares;
+    - o runner de `.http` ignora comentários entre os cabeçalhos e dá uma mensagem clara quando falta `:`.
+- ***Commits:*** `8d56540`, `8154895`, `638e397`, `f656d6a`, `6e31d37`, `ae80df9`, `0a155b1`, `cb628b9` e o desta atualização do diário. Por integrar na `main`; nada enviado para o `origin`.
