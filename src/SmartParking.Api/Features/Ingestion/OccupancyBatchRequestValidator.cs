@@ -18,7 +18,7 @@ namespace SmartParking.Api.Features.Ingestion;
 /// <item><c>eventId</c> and <c>spotId</c> are UUIDs;</item>
 /// <item><c>type</c> is <c>Occupied</c> or <c>Freed</c>;</item>
 /// <item><c>timestamp</c> is ISO 8601 with a time zone;</item>
-/// <item><c>payload</c>, when present, is an object of at most 4 KB in UTF-8.</item>
+/// <item><c>payload</c>, when present, is an object of at most 4 KB in UTF-8 that follows <see cref="PayloadRules"/>.</item>
 /// </list>
 /// Registry consistency is not checked here: it is per event and answered with 200 (handler).
 /// </summary>
@@ -62,10 +62,13 @@ internal sealed partial class OccupancyBatchRequestValidator : AbstractValidator
                     .WithMessage("'timestamp' must be ISO 8601 with a time zone (Z or ±hh:mm).")
                     .OverridePropertyName("timestamp");
                 item.RuleFor(entry => entry.Payload)
+                    .Cascade(CascadeMode.Stop)
                     .Must(payload => payload!.Value.ValueKind == JsonValueKind.Object)
                     .WithMessage("'payload' must be a JSON object.")
                     .Must(payload => Encoding.UTF8.GetByteCount(payload!.Value.GetRawText()) <= MaxPayloadBytes)
                     .WithMessage($"'payload' must not exceed {MaxPayloadBytes} bytes.")
+                    .Must(payload => PayloadRules.Violation(payload!.Value) is null)
+                    .WithMessage((_, payload) => PayloadRules.Violation(payload!.Value)!)
                     .OverridePropertyName("payload")
                     .When(entry => entry.Payload is { ValueKind: not JsonValueKind.Null });
             })

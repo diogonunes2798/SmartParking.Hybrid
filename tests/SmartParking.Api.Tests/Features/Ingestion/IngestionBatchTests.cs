@@ -125,6 +125,36 @@ public sealed class IngestionBatchTests(ApiFixture fixture)
     }
 
     [Fact]
+    public async Task Ingest_PayloadWithDollarValuesDottedNamesAndBigNumbers_StoredAsReceived_AC9()
+    {
+        // Arrange: shapes that BsonDocument.Parse would have reinterpreted or rejected (review of F4a, finding 1).
+        var cancellationToken = TestContext.Current.CancellationToken;
+        fixture.Clock.SetUtcNow(Now);
+        using var client = fixture.Sessions.CreateClient();
+        var site = await CreateSiteAsync(client, 1, cancellationToken);
+        var occupancyEvent = Event(site.Spots[0], Now);
+        occupancyEvent["payload"] = JsonNode.Parse(
+            """{ "kind": "$date", "fw.version": "2.1", "count": 12345678901, "ratio": 0.5, "flags": [true, null, "x"] }""");
+
+        // Act
+        var outcome = await PostOkAsync(client, Batch(occupancyEvent), cancellationToken);
+
+        // Assert
+        Assert.Equal(1, outcome.Accepted);
+        var payload = Assert.Single(await FindAsync(Mongo, [IdOf(occupancyEvent)], cancellationToken))["payload"].AsBsonDocument;
+        Assert.Equal(
+            new BsonDocument
+            {
+                { "kind", "$date" },
+                { "fw.version", "2.1" },
+                { "count", new BsonInt64(12345678901) },
+                { "ratio", 0.5 },
+                { "flags", new BsonArray { true, BsonNull.Value, "x" } },
+            },
+            payload);
+    }
+
+    [Fact]
     public async Task Ingest_SpotMovedToAnotherZone_OldEventKeepsOldZone_AC10()
     {
         // Arrange

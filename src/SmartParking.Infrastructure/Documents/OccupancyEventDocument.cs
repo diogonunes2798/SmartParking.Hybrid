@@ -8,7 +8,7 @@ namespace SmartParking.Infrastructure.Documents;
 /// One document of <c>occupancy_events</c> (spec 003). <c>_id</c> is the <c>eventId</c>, so the mandatory <c>_id</c>
 /// index gives idempotency without an extra index. Identifiers are standard UUIDs (subtype 4), set per member rather
 /// than by a global convention. Times are UTC BSON dates (millisecond precision). <c>payload</c> is the device's object
-/// as received, and is left out when absent.
+/// as received (converted structurally by <see cref="BsonPayload"/>), and is left out when absent.
 /// </summary>
 internal sealed class OccupancyEventDocument
 {
@@ -66,7 +66,7 @@ internal sealed class OccupancyEventDocument
             Type = occupancyEvent.Type,
             Timestamp = occupancyEvent.Timestamp.UtcDateTime,
             ReceivedAt = occupancyEvent.ReceivedAt.UtcDateTime,
-            Payload = occupancyEvent.Payload is null ? null : BsonDocument.Parse(occupancyEvent.Payload),
+            Payload = occupancyEvent.Payload is null ? null : BsonPayload.FromJson(occupancyEvent.Payload),
         };
     }
 }

@@ -72,10 +72,14 @@ internal static class IngestionApi
     public static JsonObject Batch(params JsonObject[] events) => new() { ["events"] = new JsonArray([.. events]) };
 
     public static Task<HttpResponseMessage> PostAsync(HttpClient client, JsonNode batch, CancellationToken cancellationToken) =>
-        client.PostAsync(
-            new Uri(Route, UriKind.Relative),
-            new StringContent(batch.ToJsonString(), System.Text.Encoding.UTF8, "application/json"),
-            cancellationToken);
+        PostAsync(client, batch.ToJsonString(), cancellationToken);
+
+    /// <summary>Sends the body as written, for JSON that <see cref="JsonNode"/> cannot build (a repeated member, a huge number).</summary>
+    public static async Task<HttpResponseMessage> PostAsync(HttpClient client, string body, CancellationToken cancellationToken)
+    {
+        using var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
+        return await client.PostAsync(new Uri(Route, UriKind.Relative), content, cancellationToken);
+    }
 
     public static async Task<OccupancyBatchResponse> PostOkAsync(HttpClient client, JsonNode batch, CancellationToken cancellationToken)
     {

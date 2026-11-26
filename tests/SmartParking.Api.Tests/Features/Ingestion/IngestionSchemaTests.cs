@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using SmartParking.Api.Features.Ingestion;
 using SmartParking.Api.Tests.Fixtures;
 using static SmartParking.Api.Tests.Fixtures.IngestionApi;
 
@@ -10,6 +11,8 @@ namespace SmartParking.Api.Tests.Features.Ingestion;
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class IngestionSchemaTests(ApiFixture fixture)
 {
+    private const int MaxPayloadBytes = OccupancyBatchRequestValidator.MaxPayloadBytes;
+
     private static readonly DateTimeOffset Now = new(2026, 12, 3, 8, 30, 0, TimeSpan.Zero);
 
     private string Mongo => fixture.Databases.Mongo.GetConnectionString();
@@ -42,20 +45,29 @@ public sealed class IngestionSchemaTests(ApiFixture fixture)
         Assert.Empty(await FindAsync(Mongo, [IdOf(first), secondId], cancellationToken));
     }
 
-    public static TheoryData<string> MalformedCases() =>
-    [
-        "empty batch",
-        "501 events",
-        "eventId not a UUID",
-        "type not Occupied or Freed",
-        "timestamp without zone",
-        "payload not an object",
-        "payload above 4 KB",
-    ];
+    /// <summary>The raw JSON that replaces the <c>payload</c> marker; some shapes (a repeated member) cannot be built with JsonObject.</summary>
+    private const string PayloadMarker = "\"__payload__\"";
+
+    /// <summary>Each malformed batch and the <c>errors</c> key that must name it.</summary>
+    public static TheoryData<string, string> MalformedCases() => new()
+    {
+        { "empty batch", "events" },
+        { "501 events", "events" },
+        { "eventId not a UUID", "events[1].eventId" },
+        { "type not Occupied or Freed", "events[1].type" },
+        { "timestamp without zone", "events[1].timestamp" },
+        { "payload not an object", "events[1].payload" },
+        { "payload above 4 KB", "events[1].payload" },
+        { "payload repeats a member", "events[1].payload" },
+        { "payload with extended JSON", "events[1].payload" },
+        { "payload with a non-finite number", "events[1].payload" },
+        { "payload with a $ member name", "events[1].payload" },
+        { "payload with a lone surrogate", "events[1].payload" },
+    };
 
     [Theory]
     [MemberData(nameof(MalformedCases))]
-    public async Task Ingest_MalformedBatch_Returns400AndStoresNothing_AC3(string scenario)
+    public async Task Ingest_MalformedBatch_Returns400NamingTheFieldAndStoresNothing_AC3(string scenario, string errorKey)
     {
         // Arrange
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -86,20 +98,69 @@ public sealed class IngestionSchemaTests(ApiFixture fixture)
                 broken["payload"] = new JsonArray(1, 2);
                 break;
             case "payload above 4 KB":
-                broken["payload"] = new JsonObject { ["blob"] = new string('x', 4096) };
+                broken["payload"] = PayloadOfBytes(MaxPayloadBytes + 1);
+                break;
+            case "payload repeats a member":
+                broken["payload"] = "__payload__";
+                break;
+            case "payload with extended JSON":
+                broken["payload"] = JsonNode.Parse("""{ "t": { "$date": "2026-01-01T00:00:00Z" } }""");
+                break;
+            case "payload with a non-finite number":
+                broken["payload"] = "__payload__";
+                break;
+            case "payload with a $ member name":
+                broken["payload"] = new JsonObject { ["$set"] = 1 };
+                break;
+            case "payload with a lone surrogate":
+                broken["payload"] = "__payload__";
                 break;
         }
 
+        var raw = scenario switch
+        {
+            "payload repeats a member" => """{ "a": 1, "a": 2 }""",
+            "payload with a non-finite number" => """{ "d": 1e400 }""",
+            "payload with a lone surrogate" => """{ "s": "\uD800" }""",
+            _ => null,
+        };
+        var body = Batch(events).ToJsonString();
+        if (raw is not null)
+        {
+            body = body.Replace(PayloadMarker, raw, StringComparison.Ordinal);
+        }
+
         // Act
-        using var response = await PostAsync(client, Batch(events), cancellationToken);
+        using var response = await PostAsync(client, body, cancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+        var errors = problem.RootElement.GetProperty("errors");
+        Assert.True(errors.TryGetProperty(errorKey, out _), $"errors has no '{errorKey}': {errors}");
         var sentIds = events.Select(item => item["eventId"]!.GetValue<string>())
             .Select(id => Guid.TryParse(id, out var guid) ? guid : Guid.Empty)
             .Where(id => id != Guid.Empty);
         Assert.Empty(await FindAsync(Mongo, sentIds, cancellationToken));
+    }
+
+    [Fact]
+    public async Task Ingest_PayloadOfExactly4096Bytes_IsAccepted_AC3()
+    {
+        // Arrange
+        var cancellationToken = TestContext.Current.CancellationToken;
+        fixture.Clock.SetUtcNow(Now);
+        using var client = fixture.Sessions.CreateClient();
+        var site = await CreateSiteAsync(client, 1, cancellationToken);
+        var occupancyEvent = Event(site.Spots[0], Now);
+        occupancyEvent["payload"] = PayloadOfBytes(MaxPayloadBytes);
+
+        // Act
+        var outcome = await PostOkAsync(client, Batch(occupancyEvent), cancellationToken);
+
+        // Assert
+        Assert.Equal(1, outcome.Accepted);
+        Assert.Single(await FindAsync(Mongo, [IdOf(occupancyEvent)], cancellationToken));
     }
 
     [Fact]
@@ -118,5 +179,14 @@ public sealed class IngestionSchemaTests(ApiFixture fixture)
         // Assert
         Assert.Equal(500, outcome.Accepted);
         Assert.Equal(500, (await FindAsync(Mongo, events.Select(IdOf), cancellationToken)).Count);
+    }
+
+    /// <summary>A payload whose compact JSON has exactly <paramref name="bytes"/> bytes: <c>{"blob":"x…x"}</c>.</summary>
+    private static JsonObject PayloadOfBytes(int bytes)
+    {
+        const int Overhead = 11; // {"blob":""}
+        var payload = new JsonObject { ["blob"] = new string('x', bytes - Overhead) };
+        Assert.Equal(bytes, System.Text.Encoding.UTF8.GetByteCount(payload.ToJsonString()));
+        return payload;
     }
 }
