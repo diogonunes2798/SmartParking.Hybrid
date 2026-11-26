@@ -608,3 +608,65 @@ Formato de cada entrada:
   - O ramo `feat/003-simulador` foi apagado no `origin` e localmente, a pedido do Diogo, depois de se confirmar que estava integrado na `main` (`git merge-base --is-ancestor`).
   - Continuam em aberto da F4b: os achados 2, 4, 5, 7, 8 e 9 da revisão e os dois `TODO(Diogo)` (emitir logo a seguir ao `--provision`; ADR 0009 para o `eventId` determinístico).
 - ***Commits:*** `0fe6fb1` (*merge* do PR #5); registo desta entrada no commit seguinte.
+
+## F4b: fecho dos achados da revisão
+
+- **Data:** 2026-11-26
+- **Âmbito:** especificação 003 (UC-01, UC-05, RF-01; AC-19 a AC-24). Sem AC novos e sem mudança a D1–D10. Ramo `fix/003-simulador-revisao`, a partir da `main` (`2b78399`). O plano foi aprovado pelo Diogo antes do código.
+- **Decisões do Diogo (2026-11-26):**
+  - corrigir os achados 2, 5, 7, 8 e 9; o achado 4 fica sem alteração;
+  - o `--provision` não emite logo a seguir e continua a ser uma invocação separada, porque as execuções da F12 reutilizam a mesma provisão;
+  - escrever o ADR 0009 sobre o `eventId` determinístico e o *flush* contado desde o evento mais antigo.
+- **Feito:**
+  - Achado 2: uma falha de transporte, um *timeout* ou um corpo 2xx ilegível no `--provision` deixam de escapar como exceção (código 1) e saem com o código 3. A mensagem diz que o parque pode ter ficado registado em parte e que a repetição com a mesma `--seed` precisa de uma base limpa. A provisão não passou a ser retomável.
+  - Achado 5: o Ctrl+C sai com 130 (`ExitCodes.Cancelled`), tanto durante a emissão como durante a provisão ou a leitura do mapeamento. O 130 tem precedência sobre o 5 (`NotAllDelivered`): uma corrida cancelada não é uma medição. O resumo continua no *log*.
+  - Achado 7:
+    - o `--mean-interval` tem de ser maior do que 0 e no máximo 86 400 s; NaN e infinito são rejeitados;
+    - o `--peak-factor` tem de ser finito;
+    - a repartição dos lugares por zonas passa a ser calculada em `long` (`Provisioner.ZoneRange`);
+    - um mapeamento mal formado, sem `sensors` ou com entradas nulas sai com o código 4.
+  - Achado 8: teste em tempo real do *flush* por tempo no `GatewayRunner`. São cerca de 20 eventos/s, com lotes de 500 e *flush* de 200 ms, e o teste exige mais de um pedido.
+  - Achado 9: o comentário do gerador diz agora que a sequência só está quase ordenada (o acerto de +1 ms por lugar).
+  - ADR 0009, com o índice dos ADR e a linha do RF-01 da RASTREABILIDADE atualizados. Os dois `TODO(Diogo)` da entrada F4b ficaram marcados como resolvidos.
+  - Testes novos: 13. O total passou de 448 para 461.
+- **Verificação:**
+  - `dotnet build`: 0 avisos, 0 erros;
+  - `dotnet format --verify-no-changes`: limpo;
+  - `dotnet test`: 461 testes passaram nas duas corridas seguidas depois da segunda ronda de correções. Antes dessa ronda, com 459 testes, tinham passado três corridas;
+  - mutações, todas apanhadas pelos testes novos:
+    - desligar o `FlushIfDue`;
+    - devolver 0 no cancelamento da emissão;
+    - retirar o `catch` do cancelamento na ação;
+    - voltar a comparar em `TimeSpan` no gerador;
+  - manual, sem a Api a correr:
+    - `--provision` deu o código 3;
+    - `--mean-interval 1e309` deu o código 2;
+    - um mapeamento truncado deu o código 4;
+    - o código 130 com Ctrl+C real não foi experimentado à mão. Cobrem-no os dois testes de cancelamento.
+- **Problemas:**
+  - O primeiro teste de cancelamento usava `--mean-interval 0.1` e saiu com o código 1. O System.CommandLine lê os números com a cultura atual, e em pt-PT o separador decimal é a vírgula. O teste passou a usar `1`. Fica um ponto em aberto: na linha de comandos, `0.5` é rejeitado numa máquina em português. `TODO(Diogo):` decidir se as opções numéricas devem passar a ler-se com a cultura invariante.
+  - A mutação do gerador sobreviveu à primeira versão do teste. Com `--peak-factor 1e-9` a espera média é cerca de 6e10 s, abaixo do máximo do `TimeSpan` (cerca de 9,2e11 s), por isso o transbordo não acontecia. O teste passou a usar 1e-12.
+  - O plano previa um *commit* por achado, mas o `SimulatorCommand.cs` e o `SimulatorApiTests.cs` têm alterações de vários achados no mesmo ficheiro, e aqui não é possível separá-las por blocos de forma interativa. Ficou um *commit* para as correções e os testes, como o `e56a160` da revisão anterior.
+- **Revisão independente** (`code-reviewer`, só leitura, sobre `git diff 2b78399...HEAD`): confirmou o `ZoneRange`, as exceções apanhadas no `PostAsync`, a validação, o mapeamento mal formado, o comentário do gerador e a correspondência do ADR 0009 com o código. Achados, por gravidade:
+  1. **Um Ctrl+C fora do ciclo de emissão** (provisão, leitura do mapeamento) **ainda saía com 1.** Um `SaveAsync` cancelado deixava o mapeamento truncado. O teste de cancelamento dependia de um *timer* de 1 s. **Corrigido:**
+     - a ação devolve 130 para um cancelamento;
+     - o mapeamento é escrito num ficheiro temporário e depois movido;
+     - o teste cancela no primeiro pedido de ingestão;
+     - teste novo para o cancelamento a meio da provisão.
+  2. **Um `--peak-factor` finito mas minúsculo ainda transbordava o `TimeSpan` dentro da janela.** **Corrigido** no gerador: a espera é comparada com a fronteira em segundos antes de se construir o `TimeSpan`. Impor `--peak-factor >= 1` mudaria o significado da opção, por isso não se fez sem decisão do Diogo.
+  3. **O ADR exagerava a espera máxima.** Um lote vencido pode esperar na fila atrás de um envio a repetir depois de um 503. **Corrigido** no texto.
+  4. Menores:
+     - a precedência do 130 sobre o 5 está agora documentada em `ExitCodes`;
+     - o ADR já não diz que o teste em tempo real prova a contagem desde o evento mais antigo, o que só o relógio falso prova;
+     - os testes de `SimulatorCommandTests` não têm `AC-n` no nome, porque validam opções que nenhum AC da especificação 003 descreve. Fica registado.
+- **Decisões:**
+  - Achado 4 sem alteração: um envio cortado pelo prazo de escoamento conta como não entregue. A contagem é conservadora, e um reenvio seria ignorado pela idempotência da ingestão.
+  - O limite de 86 400 s do `--mean-interval` é um limite de correção, não um valor de desempenho. `TODO(Diogo):` confirmar o limite.
+  - Secções da tese do ADR 0009: proposta 5.9.4 e 7.3. `TODO(Diogo):` confirmar.
+- ***Commits:***
+  - `9518685`: correções dos achados 2, 5, 7 e 8;
+  - `a4eee36`: achado 9;
+  - `e172419`: ADR 0009;
+  - `e044897`: segunda ronda de correções;
+  - `392280d`: texto do ADR;
+  - esta entrada fica no *commit* seguinte.
