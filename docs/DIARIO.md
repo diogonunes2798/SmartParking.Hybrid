@@ -492,3 +492,17 @@ Formato de cada entrada:
     - o intercetor do AC-11 conta também os comandos sem leitura e os escalares;
     - o runner de `.http` ignora comentários entre os cabeçalhos e dá uma mensagem clara quando falta `:`.
 - ***Commits:*** `8d56540`, `8154895`, `638e397`, `f656d6a`, `6e31d37`, `ae80df9`, `0a155b1`, `cb628b9` e o desta atualização do diário. Por integrar na `main`; nada enviado para o `origin`.
+
+## F4a: integração na `main`
+
+- **Data:** 2026-11-26
+- **Feito:**
+  - *Push* do ramo `feat/003-ingestao` (9 *commits*) e abertura do [PR #4](https://github.com/diogonunes2798/SmartParking.Hybrid/pull/4) a pedido do Diogo. A descrição inclui o resumo, a decisão de seguir a especificação 003 e não o briefing, os achados corrigidos da revisão, os pontos em aberto e a verificação.
+  - *Merge* pedido pelo Diogo, com *merge commit* (`75e0d9f`), como na F1, na F2 e na F3. O GitHub indicava o PR como integrável e sem conflitos, e o `HEAD` do PR era o mesmo da cópia local (`bbf5737`, verificado com `--match-head-commit`).
+  - Especificação 003 marcada no índice como «F4a integrada na `main`; F4b por fazer»; linha do RF-01 da RASTREABILIDADE atualizada.
+- **Problemas:**
+  - O repositório continua sem integração contínua, por isso o PR não teve verificações automáticas. A garantia são os resultados locais registados na descrição: 431 testes em duas corridas seguidas, build e format limpos.
+- **Decisões:**
+  - *Merge commit* em vez de *squash*, para que os *commits* da F4a referidos neste diário continuem a existir na `main`.
+  - O ramo `feat/003-ingestao` foi apagado no `origin` e localmente, a pedido do Diogo, depois de se confirmar que estava integrado na `main` (`git merge-base --is-ancestor`), como nas fases anteriores.
+- ***Commits:*** `75e0d9f` (*merge* do PR #4); registo desta entrada no commit seguinte.
