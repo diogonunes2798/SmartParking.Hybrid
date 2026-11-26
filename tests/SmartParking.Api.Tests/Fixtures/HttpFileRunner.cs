@@ -126,7 +126,18 @@ internal static partial class HttpFileRunner
             List<(string, string)> headers = [];
             while (index < lines.Length && lines[index].Trim().Length > 0 && !lines[index].StartsWith("###", StringComparison.Ordinal))
             {
+                if (IsCommentOrBlank(lines[index]))
+                {
+                    index++;
+                    continue;
+                }
+
                 var colon = lines[index].IndexOf(':', StringComparison.Ordinal);
+                if (colon <= 0)
+                {
+                    throw new FormatException($"Line {index + 1}: expected a 'Name: value' header or a blank line before the body, got '{lines[index]}'.");
+                }
+
                 headers.Add((lines[index][..colon].Trim(), lines[index][(colon + 1)..].Trim()));
                 index++;
             }
