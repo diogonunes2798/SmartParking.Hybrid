@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using SmartParking.Application.Abstractions;
+using SmartParking.Application.Abstractions.Documents;
 using SmartParking.Infrastructure.Cache;
 using SmartParking.Infrastructure.Documents;
 using SmartParking.Infrastructure.Hosting;
@@ -38,6 +39,13 @@ public static class DependencyInjection
             .Validate(options => options.IsValid(), ReservationOptions.ValidationMessage)
             .ValidateOnStart();
         services.TryAddSingleton(provider => provider.GetRequiredService<IOptions<ReservationOptions>>().Value.ToPolicy());
+
+        // Shared by both modes: the ingestion rules (spec 003).
+        services.AddOptions<IngestionOptions>()
+            .Bind(configuration.GetSection(IngestionOptions.SectionName))
+            .Validate(options => options.IsValid(), IngestionOptions.ValidationMessage)
+            .ValidateOnStart();
+        services.TryAddSingleton(provider => provider.GetRequiredService<IOptions<IngestionOptions>>().Value.ToPolicy());
 
         if (!PersistenceOptions.TryParseMode(configuration[PersistenceOptions.ModeKey], out var mode))
         {
@@ -77,6 +85,7 @@ public static class DependencyInjection
         TimeSpan timeout) =>
         services
             .AddRelational(configuration, healthChecks, timeout)
+            .AddSingleton<IOccupancyEventLog, MonolithicOccupancyEventLogPending>()
             .AddMessaging()
             .AddPayments();
 }

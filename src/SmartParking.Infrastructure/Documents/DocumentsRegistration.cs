@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MongoDB.Driver;
+using SmartParking.Application.Abstractions.Documents;
 
 namespace SmartParking.Infrastructure.Documents;
 
@@ -21,6 +22,14 @@ internal static class DocumentsRegistration
             ?? throw new InvalidOperationException($"ConnectionStrings:{ConnectionStringName} is not configured.");
 
         services.AddSingleton<IMongoClient>(_ => new MongoClient(connectionString));
+
+        // Append-only occupancy event log (spec 003).
+        services.AddOptions<MongoOptions>()
+            .Bind(configuration.GetSection(MongoOptions.SectionName))
+            .Validate(options => options.IsValid(), MongoOptions.ValidationMessage)
+            .ValidateOnStart();
+        services.AddSingleton<OccupancyEventsCollection>();
+        services.AddSingleton<IOccupancyEventLog, MongoOccupancyEventLog>();
 
         healthChecks.AddMongoDb(
             sp => sp.GetRequiredService<IMongoClient>(),

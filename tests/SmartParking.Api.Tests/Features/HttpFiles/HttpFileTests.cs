@@ -18,7 +18,28 @@ public sealed partial class HttpFileTests(ApiFixture fixture)
     {
         ["configuration.http"] = ["/api/facilities", "/api/sensors"],
         ["sessions.http"] = ["/api/users", "/api/sessions", "/api/reservations"],
+        ["ingest.http"] = ["/api/ingest"],
     };
+
+    [Fact]
+    public async Task HttpFile_Ingest_EachRequestReturnsItsExpectedStatus_AC18()
+    {
+        // Arrange
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = fixture.Hybrid.CreateClient();
+
+        // Act
+        var exchanges = await HttpFileRunner.RunAsync(client, FindHttpFile("ingest.http"), cancellationToken);
+
+        // Assert
+        Assert.NotEmpty(exchanges);
+        Assert.All(exchanges, exchange => Assert.NotNull(exchange.Expected));
+        Assert.Empty(exchanges.Where(exchange => exchange.Expected != exchange.Actual)
+            .Select(exchange => $"line {exchange.Line}: {exchange.Request} expected {exchange.Expected}, got {exchange.Actual}"));
+    }
+
+    [Fact]
+    public void HttpFile_EveryIngestionEndpoint_HasOneRequest_AC18() => AssertFileCoversItsEndpoints("ingest.http");
 
     [Fact]
     public void HttpFile_EveryConfigurationEndpoint_HasOneRequest_AC23() => AssertFileCoversItsEndpoints("configuration.http");

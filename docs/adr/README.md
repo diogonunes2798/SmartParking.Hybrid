@@ -13,3 +13,4 @@
 | 0005 | [Versões de tarifário com vigência](0005-versoes-de-tarifario-com-vigencia.md) | D1, D2 (valores por omissão) | RF-06; prepara UC-02 | 5.1, 5.4.1, 5.9.2 | Aceite | 2026-11-25 |
 | 0006 | [Auditoria por entidade alterada](0006-auditoria-por-entidade-alterada.md) | D2 (valor por omissão) | RF-02, RNF-06 | 5.4.1, 5.4.2 | Aceite | 2026-11-25 |
 | 0007 | [Reservas: cumprimento na transação da abertura e expiração por *worker*](0007-reservas-cumprimento-e-expiracao.md) | D1, D2 (valores por omissão); D10 | RF-02, RNF-06 | 5.4.1, 5.4.2 | Aceite | 2026-11-25 |
+| 0008 | [Registo de eventos de ocupação: escrita síncrona no MongoDB, só por acréscimo](0008-registo-de-eventos-de-ocupacao.md) | D3 (valor por omissão); D2 inalterada | RF-01, RNF-03 | 5.5, 5.9.4 | Aceite | 2026-11-25 |

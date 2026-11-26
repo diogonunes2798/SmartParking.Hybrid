@@ -1,0 +1,119 @@
+### Ingestão de eventos de ocupação (UC-01, RF-01, especificação 003)
+# Prepara um parque com dois lugares e os respetivos sensores pelos endpoints da F2. Depois envia lotes
+# ao endpoint de ingestão: um lote aceite, o mesmo lote outra vez (duplicados), um evento rejeitado pelo
+# registo e um lote com uma falta de esquema (400). Cada pedido indica o estado esperado em «# @expect»;
+# o teste HttpFileTests (AC-18) executa o ficheiro contra a Api de teste e confirma cada estado.
+# Pré-requisitos: docker compose up -d --wait; migrações; scripts/db-app-user.sh; Api a correr.
+
+@baseUrl = http://localhost:5080
+@operatorId = 0193a1b0-0000-7000-8000-000000000001
+# eventId fixos: o segundo envio do mesmo lote devolve-os como duplicate (idempotência, AC-4).
+@eventA = 0193f000-0000-7000-8000-00000000000a
+@eventB = 0193f000-0000-7000-8000-00000000000b
+
+########################################################################## Registo (F2)
+
+### Criar um parque
+# @name facility
+# @expect 201
+POST {{baseUrl}}/api/facilities
+Content-Type: application/json
+
+{
+  "operatorId": "{{operatorId}}",
+  "name": "Parque Ingestão {{$randomInt 100000 999999}}",
+  "address": "Rua da Sofia 1, Coimbra",
+  "latitude": 40.2033,
+  "longitude": -8.4103,
+  "timeZone": "Europe/Lisbon",
+  "openingHours": [ { "dayOfWeek": 1, "opensAt": "08:00:00", "closesAt": "20:00:00" } ]
+}
+
+### Criar uma zona
+# @name zone
+# @expect 201
+POST {{baseUrl}}/api/facilities/{{facility.response.body.id}}/zones
+Content-Type: application/json
+
+{ "name": "Piso 0" }
+
+### Criar dois lugares, cada um com o seu sensor de ocupação
+# @name spots
+# @expect 201
+POST {{baseUrl}}/api/facilities/{{facility.response.body.id}}/spots/batch
+Content-Type: application/json
+
+{
+  "spots": [
+    { "zoneId": "{{zone.response.body.id}}", "code": "I-001", "type": "Standard",
+      "sensor": { "hardwareId": "HW-{{$randomInt 100000 999999}}-A", "model": "OccuSense 2", "installedAt": "2026-11-01T09:00:00Z" } },
+    { "zoneId": "{{zone.response.body.id}}", "code": "I-002", "type": "Standard",
+      "sensor": { "hardwareId": "HW-{{$randomInt 100000 999999}}-B", "model": "OccuSense 2", "installedAt": "2026-11-01T09:00:00Z" } }
+  ]
+}
+
+### Ler o primeiro sensor (o evento identifica o sensor pelo hardwareId)
+# @name sensorA
+# @expect 200
+GET {{baseUrl}}/api/sensors/{{spots.response.body.$.items[0].sensorId}}
+
+### Ler o segundo sensor
+# @name sensorB
+# @expect 200
+GET {{baseUrl}}/api/sensors/{{spots.response.body.$.items[1].sensorId}}
+
+########################################################################## Ingestão
+
+### Lote aceite: um evento de cada sensor (200, accepted = 2, issues vazio)
+# @expect 200
+POST {{baseUrl}}/api/ingest/occupancy-events
+Content-Type: application/json
+
+{
+  "events": [
+    { "eventId": "{{eventA}}", "sensorId": "{{sensorA.response.body.hardwareId}}",
+      "spotId": "{{spots.response.body.$.items[0].spotId}}", "type": "Occupied", "timestamp": "2026-11-20T08:00:00Z",
+      "payload": { "battery": 87, "firmware": { "v": "2.1" } } },
+    { "eventId": "{{eventB}}", "sensorId": "{{sensorB.response.body.hardwareId}}",
+      "spotId": "{{spots.response.body.$.items[1].spotId}}", "type": "Freed", "timestamp": "2026-11-20T08:00:05+01:00" }
+  ]
+}
+
+### O mesmo lote outra vez: nada muda no registo (200, accepted = 0, duplicates = 2)
+# @expect 200
+POST {{baseUrl}}/api/ingest/occupancy-events
+Content-Type: application/json
+
+{
+  "events": [
+    { "eventId": "{{eventA}}", "sensorId": "{{sensorA.response.body.hardwareId}}",
+      "spotId": "{{spots.response.body.$.items[0].spotId}}", "type": "Occupied", "timestamp": "2026-11-20T08:00:00Z",
+      "payload": { "battery": 87, "firmware": { "v": "2.1" } } },
+    { "eventId": "{{eventB}}", "sensorId": "{{sensorB.response.body.hardwareId}}",
+      "spotId": "{{spots.response.body.$.items[1].spotId}}", "type": "Freed", "timestamp": "2026-11-20T08:00:05+01:00" }
+  ]
+}
+
+### Evento com o lugar de outro sensor: rejeitado com spot_mismatch, o lote continua a ser 200
+# @expect 200
+POST {{baseUrl}}/api/ingest/occupancy-events
+Content-Type: application/json
+
+{
+  "events": [
+    { "eventId": "{{$guid}}", "sensorId": "{{sensorA.response.body.hardwareId}}",
+      "spotId": "{{spots.response.body.$.items[1].spotId}}", "type": "Freed", "timestamp": "2026-11-20T08:10:00Z" }
+  ]
+}
+
+### Falta de esquema (sem timestamp): 400 com ValidationProblemDetails em events[0].timestamp; nada é gravado
+# @expect 400
+POST {{baseUrl}}/api/ingest/occupancy-events
+Content-Type: application/json
+
+{
+  "events": [
+    { "eventId": "{{$guid}}", "sensorId": "{{sensorA.response.body.hardwareId}}",
+      "spotId": "{{spots.response.body.$.items[0].spotId}}", "type": "Freed" }
+  ]
+}
