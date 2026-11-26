@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SmartParking.Api\SmartParking.Api.csproj" />
+    <!-- The simulator's tests (spec 003, F4b) reuse the Api host and the databases of the "Api" collection. -->
+    <ProjectReference Include="..\..\tools\SensorSimulator\SensorSimulator.csproj" />
   </ItemGroup>
 
   <ItemGroup>
