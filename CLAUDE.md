@@ -59,7 +59,8 @@ dotnet run --project src/SmartParking.Api              # liga como smartparking_
 dotnet run --project src/SmartParking.Workers          # liga como smartparking_workers; expira reservas a cada Reservations:ExpiryScanSeconds
 dotnet ef migrations add <Nome> --project src/SmartParking.Infrastructure --startup-project src/SmartParking.Api
 dotnet ef database update --project src/SmartParking.Infrastructure --startup-project src/SmartParking.Api
-dotnet run --project tools/SensorSimulator -- --spots 5000 --mean-interval 300 --peak-factor 10 --seed 42   # a partir da F4
+dotnet run --project tools/SensorSimulator -- --provision --spots 5000 --zones 5 --seed 42   # regista o parque pela Api e grava sensor-map.json
+dotnet run --project tools/SensorSimulator -- --mean-interval 300 --peak-factor 10 --seed 42 --peak-at 00:10:00 --peak-duration 00:05:00 --duration 00:30:00   # emite em tempo real; nunca escreve em results/
 ./bench/run.sh <cenario> --mode hybrid|monolithic --runs 5   # ainda não existe; escreverá results/<cenario>/<AAAA-MM-DD_HHMM>.csv
 ```
 

@@ -33,6 +33,13 @@
     <PackageVersion Include="Scalar.AspNetCore" Version="3.2.0" />
   </ItemGroup>
 
+  <ItemGroup Label="Tools">
+    <!-- SensorSimulator (F4b, spec 003). System.CommandLine stays on the 2.0.x line shipped with .NET 10 (3.0 follows .NET 11). -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.15" />
+    <PackageVersion Include="System.CommandLine" Version="2.0.15" />
+  </ItemGroup>
+
   <ItemGroup Label="Tests">
     <PackageVersion Include="xunit.v3" Version="4.0.3" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.15" />

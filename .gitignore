@@ -482,3 +482,6 @@ $RECYCLE.BIN/
 *.swp
 CLAUDE.local.md
 .env
+
+# SensorSimulator mappings (spec 003, F4b): the ids belong to one local database.
+sensor-map*.json

@@ -4,6 +4,8 @@
     <ProjectReference Include="..\..\src\SmartParking.Domain\SmartParking.Domain.csproj" />
     <ProjectReference Include="..\..\src\SmartParking.Application\SmartParking.Application.csproj" />
     <ProjectReference Include="..\..\src\SmartParking.Infrastructure\SmartParking.Infrastructure.csproj" />
+    <!-- AC-19 (spec 003): the simulator references no project of src/ nor any database library. -->
+    <ProjectReference Include="..\..\tools\SensorSimulator\SensorSimulator.csproj" />
   </ItemGroup>
 
   <ItemGroup>

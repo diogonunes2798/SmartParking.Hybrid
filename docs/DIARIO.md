@@ -506,3 +506,80 @@ Formato de cada entrada:
   - *Merge commit* em vez de *squash*, para que os *commits* da F4a referidos neste diário continuem a existir na `main`.
   - O ramo `feat/003-ingestao` foi apagado no `origin` e localmente, a pedido do Diogo, depois de se confirmar que estava integrado na `main` (`git merge-base --is-ancestor`), como nas fases anteriores.
 - ***Commits:*** `75e0d9f` (*merge* do PR #4); registo desta entrada no commit seguinte.
+
+## F4b: simulador de sensores (especificação 003)
+
+- **Data:** 2026-11-26
+- **Feito:**
+  - Plano aprovado pelo Diogo na sessão (UC-01, RF-01; prepara o UC-05; AC-19 a AC-24; D8 com os valores por omissão; D2, D6 e D7 não tocadas), no ramo `feat/003-simulador`. O Diogo escolheu:
+    - os testes em `tests/SmartParking.Api.Tests`, que reutilizam o `ApiFixture` e os contentores, em vez de um projeto de testes novo;
+    - 5 zonas por omissão (`--zones`).
+  - `tools/SensorSimulator`, aplicação de consola na `SmartParking.slnx` (pasta `/tools/`):
+    - cliente HTTP de caixa preta da Api, com os seus próprios DTO de fio; não referencia nenhum projeto de `src/` nem bibliotecas de bases de dados (regra de arquitetura nova, parte do AC-19);
+    - pacotes novos: `Microsoft.Extensions.Hosting` e `Microsoft.Extensions.Http` 10.0.15, `System.CommandLine` 2.0.15;
+    - `--provision`: um parque, `--zones` zonas e os lugares com sensor de ocupação, só pelos *endpoints* da F2 (`spots/batch` em pedidos de até 1 000), e o ficheiro de mapeamento `hardwareId`–`spotId` (por omissão `sensor-map.json`, ignorado pelo Git). Os nomes, os códigos e os `hardwareId` são função da *seed*; só os identificadores mudam entre duas provisões;
+    - gerador puro: um processo de Poisson por lugar, com taxa `1/mean` fora e `factor/mean` dentro das janelas `--peak-at`/`--peak-duration`. Quando um sorteio passa uma fronteira de janela, sorteia-se de novo a partir dela (exato pela ausência de memória da exponencial). O estado inicial é sorteado com a *seed* e os tipos alternam. Cada lugar tem o seu `Random`, semeado com SHA-256 da *seed* e do `hardwareId`;
+    - `eventId`: UUID versão 8 a partir de SHA-256 da *seed*, do instante de arranque, do `hardwareId` e do número de sequência. A mesma *seed* e o mesmo relógio dão os mesmos identificadores (AC-20); outra corrida com a mesma *seed* não colide no registo idempotente;
+    - `timestamp` em UTC com milissegundos e `Z` (dentro do formato da F4a);
+    - *gateway* virtual por parque: lote aos 500 eventos ou 1 s depois do evento mais antigo do *buffer* (`--batch-size`, `--flush-interval`). Cada *gateway* envia os seus lotes por ordem, numa tarefa própria, para que a espera de um 503 não pare a geração;
+    - envio por `IHttpClientFactory`. Só o 503 é repetido: o mesmo corpo serializado, depois do `Retry-After` (segundos ou data HTTP), até `--max-retries`. As outras respostas ficam registadas e contadas;
+    - resumo da corrida no *log* da consola (*stderr*); nunca escreve em `results/` (o `--mapping` dentro de uma pasta `results` é recusado).
+  - Testes em `tests/SmartParking.Api.Tests/Features/Simulator/` e `ArchitectureTests/Features/SimulatorIsolationTests.cs`:
+    - AC-19: a linha de comandos da especificação (`--provision --spots 20 --seed 42`) contra a Api de teste; o teste confirma por `GET` da F2 o parque, as 5 zonas, os 20 lugares, os 20 sensores de ocupação ativos e o mapeamento;
+    - AC-20 e AC-21: sequências iguais com a mesma *seed* e o mesmo `FakeTimeProvider`, diferentes com outra *seed* ou outro instante; tipos alternados por lugar;
+    - AC-22: o intervalo é calculado no teste, sem valores escritos à mão. A contagem fora da janela tem de ficar no intervalo central de uma Poisson(N·T_out/mean). Dado o total n, a contagem dentro segue uma Binomial(n, p), com p = factor·T_in/(factor·T_in + T_out), e a razão das taxas tem de ficar no intervalo daí derivado. Os quantis vêm da soma do log-pmf, com α = 10⁻⁶ declarado no teste;
+    - AC-23: regra do acumulador com o relógio falso (500 eventos; 1 s contado desde o mais antigo; valores configuráveis) e uma corrida em tempo real contra a Api de teste, com um *handler* de registo, em que nenhum pedido passa de 500 e todos os eventos são aceites;
+    - AC-24: um registo de eventos que falha só na primeira escrita dá 503 com `Retry-After: 1`. O simulador reenvia os mesmos `eventId` depois da espera, e o MongoDB fica com cada evento uma vez. Testes extra: 503 permanente, que para ao fim de `--max-retries`, e o `Retry-After` em segundos, em data ou ausente.
+  - Contagem de testes:
+    - antes da revisão: 446 a passar em duas corridas seguidas da solução (431 antes da F4b);
+    - depois das correções da revisão: 448 a passar em duas corridas seguidas.
+  - Testes de mutação, todos detetados:
+    - sem alternância, falha o AC-21;
+    - sem o fator de pico, falha o AC-22;
+    - `eventId` novos no reenvio, falha o AC-24;
+    - lote de 501, falha o AC-23;
+    - `Retry-After` ignorado, falha o AC-24;
+    - desfazer cada uma das três correções da revisão, ou esperar 10 % menos do que o `Retry-After`, faz falhar o teste novo correspondente.
+  - Verificação manual contra o `compose.yaml`, com a Api como `smartparking_api` e as cadeias de ligação montadas a partir do `.env` só no processo:
+    - `--provision --spots 20 --seed 42` criou o parque, 5 zonas e 20 lugares com sensor;
+    - uma corrida de 30 s com uma janela de pico terminou com todos os eventos aceites, sem duplicados nem rejeitados;
+    - no `mongosh`, o número de documentos do parque é igual ao número de aceites, os `_id` são todos distintos (versão 8) e os tipos aparecem em número igual ±1.
+
+    São contagens de verificação, não medições: as medições são da F12.
+  - Roslyn: 0 diagnósticos. O `detect_antipatterns` assinalou:
+    - os dois `catch (OperationCanceledException)` com comentário, que são o fim esperado da corrida e do escoamento;
+    - o `Main` sem `CancellationToken`, que vem do `System.CommandLine`.
+  - Documentação: RASTREABILIDADE (linha do RF-01), índice das especificações, comandos do simulador no `CLAUDE.md`.
+- **Problemas:**
+  - O `System.CommandLine` 2.0 não converte `Uri`: o AC-19 falhou com `Cannot parse argument … as expected type 'System.Uri'`. O `--api` passou a texto, validado com `Uri.TryCreate`.
+  - Os validadores do comando raiz não veem os valores por omissão. Na primeira versão, `--help` funcionava, mas qualquer corrida dava erros como «`--spots` must be at least 1» com os valores por omissão. A validação passou para dentro da ação, sobre o `ParseResult`.
+  - Durante essa correção, o formatador automático (*hook* pós-edição) apagou o bloco de validação inteiro, porque a primeira de duas edições deixou o ficheiro com sintaxe inválida. O bloco foi reescrito numa só edição.
+  - O `Program` com instruções de nível superior criaria um segundo tipo global `Program`, visível nos testes ao lado do `Program` da Api (`InternalsVisibleTo`). Passou a `SmartParking.SensorSimulator.Program` com `Main` explícito.
+  - A primeira bateria completa passou a saída por `hooks/post-test-analyze.sh`, que não existe no repositório (problema já registado na F1, na F2b e na F3a). A saída perdeu-se e a bateria foi repetida com o *script* do *plugin* do *kit*. Esse *script* não lê o resumo do xUnit v3 («All 0 test(s) passed»), por isso a contagem vem da linha `Test run summary` do `dotnet test`.
+  - Na correção do achado 1, o formatador automático voltou a reescrever o ficheiro a meio de uma edição (chavetas em excesso) e apagou o método `RetryAfter`. O `git diff` mostrou a perda antes de compilar; o método foi reposto a partir do *commit* `52dcab8`.
+  - Apesar da memória do projeto, dois comandos usaram *heredoc* no Git Bash (o `.csproj` inicial e a mensagem do primeiro *commit*). Desta vez não falharam; os *scripts* seguintes ficaram em ficheiros.
+- **Decisões:**
+  - `System.CommandLine` fica na linha 2.0.x, distribuída com o .NET 10 (a 3.0.0 acompanha o .NET 11), pelo mesmo critério dos pacotes `Microsoft.*` 10.x.
+  - Sem Polly nem `AddStandardResilienceHandler`: também repetiriam outras respostas 5xx e *timeouts*, o que muda a semântica da especificação (só o 503, o mesmo lote, depois do `Retry-After`).
+  - O instante de arranque entra no `eventId`. Assim, as várias execuções da F12 com a mesma *seed* não chegam ao registo como duplicados. A especificação pede identificadores determinísticos «para a mesma *seed* e o mesmo relógio», e isto cumpre-o.
+  - O `--provision` grava o mapeamento e termina; a emissão é uma segunda invocação sobre o ficheiro. Leitura da especificação: «depois emite sobre esse mapeamento». `TODO(Diogo):` confirmar, ou pedir que o `--provision` emita logo a seguir.
+  - `TODO(Diogo):` decidir se o `eventId` determinístico e o *flush* contado desde o evento mais antigo justificam um ADR 0009 ou ficam só neste diário.
+- **Revisão independente** (`code-reviewer`, só leitura, sobre `git diff main...HEAD`): não encontrou erros na matemática do gerador, na construção do `eventId`, no acumulador, na repartição por zonas e lotes de 1 000, nem na repetição após 503. Também não encontrou violações das convenções do `CLAUDE.md`. O Diogo pediu a correção dos achados 1, 3 e 6 (2026-11-26); os restantes ficam registados. Achados, por gravidade:
+  1. **Uma resposta 200 com corpo mal formado derruba o *gateway*.** O `ReadFromJsonAsync` está fora do `try`. A tarefa do *gateway* falha, os lotes seguintes não são enviados e a corrida termina com uma exceção (código 1) sem resumo. **Corrigido:**
+     - um 200 cujas contagens não se leem (`JsonException`, `HttpRequestException`, `IOException` ou corpo vazio) fica registado em `Warning` e conta como não entregue, porque nada confirma a gravação;
+     - o *gateway* continua a enviar os lotes seguintes;
+     - teste novo: um *handler* que trunca o corpo de cada 200 da Api de teste. A corrida termina com resumo, todos os lotes são enviados e nenhum conta como entregue.
+  2. **Uma provisão interrompida a meio impede repetir com a mesma *seed*.** O parque e os lotes já gravados ficam, e o nome do parque e os `hardwareId` são únicos, por isso a repetição dá 409. Um `HttpRequestException` no `--provision` também escapa como exceção (código 1 em vez de 3).
+  3. **O AC-24 mede a espera a partir do início do primeiro pedido, e não da chegada do 503.** Uma espera um pouco mais curta do que o `Retry-After` passaria; inversamente, os *timers* do Windows podem disparar alguns milissegundos antes do `Stopwatch`. **Corrigido:**
+     - o *handler* de registo guarda também o instante da resposta;
+     - o teste mede da chegada do 503 até ao reenvio, com uma tolerância explícita de um *tick* do *timer* do Windows (16 ms). É uma margem de correção, não um valor de desempenho.
+  4. Um envio interrompido pelo fim do prazo de escoamento conta como não entregue, embora a Api o possa ter gravado.
+  5. Uma corrida interrompida com Ctrl+C sai com 0, como uma corrida completa; `ExitCodes.Cancelled` não é usado.
+  6. **A *seed* e o `eventId` dependem da cultura atual.** As cadeias passadas ao SHA-256 são formatadas na cultura corrente, e uma *seed* negativa pode mudar entre máquinas (sinal menos U+2212). **Corrigido:** as duas cadeias são formatadas com `FormattableString.Invariant`. Teste novo: com a *seed* −1 e uma cultura cujo sinal menos é U+2212, a sequência é igual à da cultura invariante.
+  7. Validação incompleta:
+     - `--mean-interval` infinito ou enorme dá `OverflowException`;
+     - `zone * spots` pode exceder `int`;
+     - um mapeamento mal formado dá uma exceção não tratada.
+  8. Nenhum teste exercita o *flush* por tempo dentro do `GatewayRunner`. O acumulador está provado com o relógio falso, mas a corrida em tempo real só usa lotes cheios e o *flush* final.
+  9. A correção de +1 ms por lugar pode deixar a sequência global fora de ordem por 1 ms; é inofensivo, mas o comentário diz «ordenada».
+- ***Commits:*** `52dcab8` (código e testes), `88ded9c` (documentação), o das correções da revisão e o desta atualização do diário. Por integrar na `main`; nada enviado para o `origin`.
