@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -170,6 +171,87 @@ public sealed class SimulatorApiTests(ApiFixture fixture)
         Assert.Equal(summary.Batches, corrupter.Requests);
         Assert.Equal(summary.Generated, summary.NotDeliveredEvents);
         Assert.Equal(0, summary.Accepted);
+    }
+
+    [Fact]
+    public async Task Provision_TransportFailsMidway_ExitsWithProvisioningFailedAndWritesNoMapping_AC19()
+    {
+        // Arrange: the facility and the zone are registered, then the connection is lost (review of F4b, finding 2).
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var api = fixture.Hybrid;
+        var mappingFile = Path.Combine(Path.GetTempPath(), $"sensor-map-{Guid.NewGuid():N}.json");
+        var command = SimulatorCommand.Create(services => SimulatorHost.UseTestServer(services, api, new FailingSpotBatchHandler()));
+        var seed = Random.Shared.Next(1_000_000, int.MaxValue);
+
+        // Act
+        var exitCode = await command
+            .Parse(["--provision", "--spots", "4", "--zones", "1", "--seed", seed.ToString(CultureInfo.InvariantCulture),
+                "--mapping", mappingFile, "--api", api.Server.BaseAddress.ToString()])
+            .InvokeAsync(cancellationToken: cancellationToken);
+
+        // Assert
+        Assert.Equal(ExitCodes.ProvisioningFailed, exitCode);
+        Assert.False(File.Exists(mappingFile));
+    }
+
+    [Fact]
+    public async Task Emit_CancelledBeforeDuration_ExitsWithCancelled_AC23()
+    {
+        // Arrange: a provisioned mapping and a run without --duration (review of F4b, finding 5).
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var api = fixture.Hybrid;
+        var mappingFile = Path.Combine(Path.GetTempPath(), $"sensor-map-{Guid.NewGuid():N}.json");
+        var command = SimulatorCommand.Create(services => SimulatorHost.UseTestServer(services, api));
+        var address = api.Server.BaseAddress.ToString();
+        var seed = Random.Shared.Next(1_000_000, int.MaxValue).ToString(CultureInfo.InvariantCulture);
+
+        try
+        {
+            var provisioned = await command
+                .Parse(["--provision", "--spots", "5", "--zones", "1", "--seed", seed, "--mapping", mappingFile, "--api", address])
+                .InvokeAsync(cancellationToken: cancellationToken);
+            Assert.Equal(ExitCodes.Success, provisioned);
+            using var ctrlC = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            ctrlC.CancelAfter(TimeSpan.FromSeconds(1));
+
+            // Act
+            var exitCode = await command
+                .Parse(["--mean-interval", "1", "--seed", seed, "--mapping", mappingFile, "--api", address])
+                .InvokeAsync(cancellationToken: ctrlC.Token);
+
+            // Assert
+            Assert.Equal(ExitCodes.Cancelled, exitCode);
+        }
+        finally
+        {
+            File.Delete(mappingFile);
+        }
+    }
+
+    [Fact]
+    public async Task Gateway_LowRate_FlushesByTimeBeforeBatchIsFull_AC23()
+    {
+        // Arrange: 20 spots at about 20 events/s in total never fill a batch of 500, so every batch sent before the end
+        // of the run comes from the flush interval (review of F4b, finding 8).
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var api = fixture.Hybrid;
+        using var client = api.CreateClient();
+        var site = await CreateSiteAsync(client, 20, cancellationToken);
+        var recorder = new RecordingHandler();
+        await using var services = SimulatorHost.Create(api, recorder);
+        var generator = new GeneratorSettings(42, TimeSpan.FromSeconds(1), 10, []);
+        var settings = SenderSettings.Default with { BatchSize = 500, FlushInterval = TimeSpan.FromMilliseconds(200) };
+
+        // Act
+        var summary = await services.GetRequiredService<GatewayRunner>().RunAsync(
+            SimulatorMaps.FromSite(site), generator, settings, TimeSpan.FromSeconds(1.5), cancellationToken);
+
+        // Assert: the final flush alone would give one request.
+        var sizes = recorder.Requests.Select(request => request.EventIds.Count).ToList();
+        Assert.True(sizes.Count > 1, $"Expected flushes by time before the end of the run; got {sizes.Count} request(s).");
+        Assert.All(sizes, size => Assert.InRange(size, 1, settings.BatchSize - 1));
+        Assert.Equal(summary.Generated, sizes.Sum());
+        Assert.Equal(summary.Generated, summary.Accepted);
     }
 
     [Fact]

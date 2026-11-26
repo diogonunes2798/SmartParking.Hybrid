@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -16,6 +17,12 @@ namespace SmartParking.SensorSimulator;
 /// </summary>
 internal static class SimulatorCommand
 {
+    /// <summary>
+    /// Upper bound of <c>--mean-interval</c> (one day). A correctness limit, not a performance value: it keeps
+    /// <see cref="TimeSpan.FromSeconds(double)"/> and the generator's offsets far from overflow (review of F4b, finding 7).
+    /// </summary>
+    public const double MaxMeanIntervalSeconds = 86_400;
+
     /// <param name="configureServices">Runs after the simulator's own registrations; the tests use it to reach the test server.</param>
     public static RootCommand Create(Action<IServiceCollection>? configureServices = null)
     {
@@ -60,14 +67,15 @@ internal static class SimulatorCommand
                 errors.Add("--zones must be between 1 and --spots.");
             }
 
-            if (result.GetValue(meanInterval) is not > 0)
+            // Not-a-number fails "> 0" and infinity fails the upper bound (review of F4b, finding 7).
+            if (result.GetValue(meanInterval) is not (> 0 and <= MaxMeanIntervalSeconds))
             {
-                errors.Add("--mean-interval must be greater than 0.");
+                errors.Add($"--mean-interval must be greater than 0 and at most {MaxMeanIntervalSeconds} seconds.");
             }
 
-            if (result.GetValue(peakFactor) is not > 0)
+            if (result.GetValue(peakFactor) is not > 0 || !double.IsFinite(result.GetValue(peakFactor)))
             {
-                errors.Add("--peak-factor must be greater than 0.");
+                errors.Add("--peak-factor must be a finite number greater than 0.");
             }
 
             if (result.GetValue(batchSize) is < 1 or > OccupancyBatchRequest.MaxEvents)
@@ -151,6 +159,10 @@ internal static class SimulatorCommand
         if (outcome.Map is null)
         {
             await Console.Error.WriteLineAsync(outcome.Error);
+            // Not resumable (review of F4b, finding 2): the facility name and the hardwareIds are unique, so what was
+            // already registered makes a repetition with the same seed answer 409.
+            await Console.Error.WriteLineAsync(
+                "The facility may be partly registered. Repeat on a clean database, or with another --seed.");
             return ExitCodes.ProvisioningFailed;
         }
 
@@ -168,14 +180,32 @@ internal static class SimulatorCommand
             return ExitCodes.MappingNotFound;
         }
 
-        var map = await SensorMap.LoadAsync(file.FullName, cancellationToken);
-        if (map is null || map.Sensors.Count == 0)
+        SensorMap? map;
+        try
+        {
+            map = await SensorMap.LoadAsync(file.FullName, cancellationToken);
+        }
+        catch (JsonException exception)
+        {
+            // A malformed mapping is a usage error, not a crash (review of F4b, finding 7).
+            await Console.Error.WriteLineAsync($"Mapping is not valid: {file.FullName}. {exception.Message}");
+            return ExitCodes.MappingNotFound;
+        }
+
+        if (map?.Sensors is not { Count: > 0 } || map.Sensors.Any(sensor => sensor is null))
         {
             await Console.Error.WriteLineAsync($"Mapping has no sensors: {file.FullName}.");
             return ExitCodes.MappingNotFound;
         }
 
         var summary = await services.GetRequiredService<GatewayRunner>().RunAsync(map, generator, sender, duration, cancellationToken);
+
+        // Ctrl+C ends the run with its summary, but the exit code tells it apart from a complete run (review of F4b, finding 5).
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return ExitCodes.Cancelled;
+        }
+
         return summary.NotDeliveredEvents == 0 ? ExitCodes.Success : ExitCodes.NotAllDelivered;
     }
 
