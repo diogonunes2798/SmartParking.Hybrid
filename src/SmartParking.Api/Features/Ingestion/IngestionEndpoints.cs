@@ -23,10 +23,9 @@ internal sealed partial class IngestionEndpoints : IEndpointGroup
 
         // The mode filter goes first, so in Monolithic mode even an invalid batch is a 501 (nothing is read).
         group.MapPost("/occupancy-events", IngestAsync)
-            .AddEndpointFilter<RequireHybridModeFilter>()
+            .RequireHybridMode("Ingestion.NotImplementedInMode", "Occupancy ingestion in Monolithic mode arrives in F9.")
             .WithRequestValidation<OccupancyBatchRequest>()
             .Produces<OccupancyBatchResponse>()
-            .ProducesProblem(StatusCodes.Status501NotImplemented)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
 
