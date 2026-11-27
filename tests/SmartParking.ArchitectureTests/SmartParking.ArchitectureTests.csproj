@@ -6,6 +6,8 @@
     <ProjectReference Include="..\..\src\SmartParking.Infrastructure\SmartParking.Infrastructure.csproj" />
     <!-- AC-19 (spec 003): the simulator references no project of src/ nor any database library. -->
     <ProjectReference Include="..\..\tools\SensorSimulator\SensorSimulator.csproj" />
+    <!-- Spec 004 (F5a): the rebuilder composes ports and uses no database library directly. -->
+    <ProjectReference Include="..\..\tools\ProjectionRebuilder\ProjectionRebuilder.csproj" />
   </ItemGroup>
 
   <ItemGroup>
