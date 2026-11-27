@@ -149,6 +149,27 @@ public sealed class ProjectionRebuilderTests(ApiFixture fixture)
     }
 
     [Fact]
+    public async Task Rebuild_FacilityAtLatitudeLimit_EntersTheGeoIndex()
+    {
+        // Arrange: the greatest latitude the domain accepts is the greatest the Redis GEO index accepts (review of F5a).
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var environment = await CreateIsolatedAsync(fixture, cancellationToken);
+        await using var factory = ApiFixture.CreateFactory(environment.Api);
+        using var client = factory.CreateClient();
+        await using var redis = await ConnectAsync(fixture);
+        var (facility, _) = await FacilityApi.CreateAsync(
+            client, cancellationToken, FacilityApi.NewRequest() with { Latitude = SmartParking.Domain.Common.GeoCoordinate.MaxLatitude });
+
+        // Act
+        var exitCode = await RunRebuilderAsync(environment, cancellationToken);
+
+        // Assert
+        Assert.Equal(ExitCodes.Success, exitCode);
+        var geo = await redis.GetDatabase(IsolatedRedisDatabase).SortedSetRangeByRankAsync("avail:geo:facilities");
+        Assert.Contains(Id(facility.Id), geo.Select(member => member.ToString()));
+    }
+
+    [Fact]
     public async Task Rebuild_MonolithicMode_RefusesWithoutTouchingTheView()
     {
         // Arrange

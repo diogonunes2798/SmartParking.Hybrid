@@ -11,12 +11,26 @@ public sealed class InvariantTests
     [Theory]
     [InlineData(-90.0001, 0)]
     [InlineData(90.0001, 0)]
+    [InlineData(-85.0512, 0)]
+    [InlineData(85.0512, 0)]
     [InlineData(0, -180.0001)]
     [InlineData(0, 180.0001)]
     public void GeoCoordinate_OutOfRange_Throws(double latitude, double longitude)
     {
         // Act + Assert
         Assert.Throws<ArgumentOutOfRangeException>(() => new GeoCoordinate(latitude, longitude));
+    }
+
+    [Theory]
+    [InlineData(GeoCoordinate.MinLatitude, GeoCoordinate.MinLongitude)]
+    [InlineData(GeoCoordinate.MaxLatitude, GeoCoordinate.MaxLongitude)]
+    public void GeoCoordinate_AtLimits_IsAccepted(double latitude, double longitude)
+    {
+        // Act
+        var coordinate = new GeoCoordinate(latitude, longitude);
+
+        // Assert
+        Assert.Equal((latitude, longitude), (coordinate.Latitude, coordinate.Longitude));
     }
 
     [Theory]

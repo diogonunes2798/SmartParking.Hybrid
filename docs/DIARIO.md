@@ -794,3 +794,21 @@ Formato de cada entrada:
   - A ferramenta ainda não exporta métricas por OTLP (o `HostingDefaults` é só para `WebApplicationBuilder`). A duração fica no *log* e no `Meter`; a exportação para a F12 decide-se quando houver os cenários de medição.
 - **Decisões:** ver ADR 0010 (Lua por evento, milissegundos, desempate pelo texto do UUID, chaves derivadas no script, *rebuild* em Application, índice criado no arranque sem derrubar o *host*). Não foi feita a verificação manual contra o `compose.yaml` nem o `explain` da agregação do último evento (risco do plano); ficam para a revisão da F5a.
 - ***Commits:*** no ramo `feat/004-vista-disponibilidade`.
+
+## F5a: revisão independente e latitude limitada
+
+- **Data:** 2026-11-27
+- **Feito:**
+  - Revisão independente do diff da F5a por um agente separado. Não encontrou erros que afetem os AC; confirmou no código a paridade do AC-10 (milissegundos e ordem dos GUID no MongoDB), o tratamento dos campos em falta no Lua, a concorrência do *rebuild* e os tempos de vida no DI.
+  - Achado 1 (importante), confirmado: o domínio aceitava latitudes em [−90, 90], mas o `GEOADD` do Redis recusa fora de [−85,05112878, 85,05112878]. Um só parque nessa faixa fazia falhar todos os *rebuilds* e deixava a vista parcial. Por decisão do Diogo, o `GeoCoordinate` passou a esse intervalo; o validador da Api usa as mesmas constantes. Especificação 001 revista (tabela do domínio e AC-17) e ADR 0010 atualizado.
+  - Testes: limites aceites e valores logo acima recusados no `GeoCoordinate`; o AC-17 da 001 usa agora 85,1; um parque exatamente no limite entra no índice GEO e o *rebuild* termina com sucesso.
+- **Problemas:** a spec 004 ainda diz `lat` ∈ [−90, 90] para o ponto de pesquisa de `GET /api/availability/nearby`. O `GEOSEARCH` recusa o mesmo intervalo, por isso a validação desse ponto tem de seguir o novo limite na F5b (fica para o plano da F5b).
+- **Decisões:** os outros achados ficam registados, sem correção nesta fase:
+  - 2: a comparação de texto no Lua usa `strcoll`; com o *locale* C da imagem é a ordem de bytes que o ADR 0010 pressupõe;
+  - 3: na F6 o projetor deve receber só eventos já gravados no registo, ou um `eventId` repetido com outro `timestamp` faria divergir o estado;
+  - 4: lugares inativos e lugares que mudaram de zona dão o mesmo resultado nos dois caminhos (comportamento da spec);
+  - 5: as três consultas da configuração não correm numa transação `RepeatableRead`; aceitável com o *rebuild* *offline*;
+  - 6: o `DocumentsInitializer` só apanha `MongoException` e `TimeoutException`; outra exceção pararia o *host*;
+  - 7: o teste do AC-12 corre ao mesmo tempo que o inicializador do *host*;
+  - 8: as bases de dados dos testes não são apagadas, e a base 1 do Redis só é segura porque a coleção "Api" corre em série;
+  - 9: o `catch (Exception)` da ferramenta é uma exceção à regra do CLAUDE.md, justificada por ser o limite do processo.

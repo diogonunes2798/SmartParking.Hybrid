@@ -26,12 +26,15 @@ A F4 grava os eventos de ocupação no MongoDB, mas o UC-03 precisa de saber qua
 - **Índice do MongoDB à inicialização, sem derrubar o arranque.** Um serviço em segundo plano de `Documents/` cria o índice quando a Api ou o Workers arrancam em modo híbrido; uma falha fica registada em `Warning` e o arranque continua. O *rebuild* cria o índice antes de ler, e aí uma falha termina a execução.
 - **Falhas.** Uma falha do Redis, do MongoDB ou do PostgreSQL propaga-se ao chamador. Na ferramenta, termina com o código de saída 4, e a solução é voltar a correr o *rebuild*, que é idempotente.
 
+- **Latitude limitada no domínio (revisão da F5a, 2026-11-27).** O índice GEO do Redis só aceita latitudes em [−85,05112878, 85,05112878], o limite da projeção Web Mercator. Um parque fora desse intervalo faria falhar o `GEOADD` e, com ele, todos os *rebuilds*, deixando a vista parcial. Por decisão do Diogo, o `GeoCoordinate` passou a aceitar só esse intervalo, e a especificação 001 foi revista. Nenhum parque real fica de fora.
+
 ## Alternativas consideradas
 
 - **`WATCH`/`MULTI` em vez de Lua.** Também é atómico, mas obriga a repetir a transação quando há conflito e precisa de pelo menos duas idas ao Redis por evento.
 - **Guardar o `timestamp` com a precisão de .NET (*ticks*).** A ordem em direto seria mais fina, mas o *rebuild* não a conseguiria reproduzir a partir do MongoDB, e o AC-10 falharia em eventos com fração de milissegundo.
 - **Publicar no `IEventBus` já na F5.** Seria decidir D2 antes da F6.
 - **Troca atómica da vista durante o *rebuild*** (escrever num prefixo novo e trocar no fim). Fica para rever se as medições do RNF-03 na F12 mostrarem que o estado parcial durante o *rebuild* é um problema (especificação 004, ronda 2).
+- **Deixar fora do índice GEO os parques acima do limite**, com um aviso, em vez de limitar o domínio. Manteria a especificação 001, mas esses parques ficariam invisíveis à pesquisa por raio sem que o operador o soubesse.
 - **Orquestrar o *rebuild* na própria ferramenta**, com acesso direto às três bibliotecas. Seria mais curto, mas duplicaria o código das subcamadas e tiraria o *rebuild* do alcance dos testes de arquitetura.
 
 ## Consequências
