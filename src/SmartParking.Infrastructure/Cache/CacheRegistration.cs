@@ -26,6 +26,7 @@ internal static class CacheRegistration
         // Availability view (spec 004). Registered in every hybrid host; nothing invokes the projector until F6.
         services.AddSingleton<IOccupancyProjector, OccupancyProjector>();
         services.AddSingleton<IAvailabilityViewStore, AvailabilityViewStore>();
+        services.AddSingleton<IAvailabilityReader, AvailabilityReader>();
 
         healthChecks.AddCheck<RedisHealthCheck>(
             HealthCheckName,

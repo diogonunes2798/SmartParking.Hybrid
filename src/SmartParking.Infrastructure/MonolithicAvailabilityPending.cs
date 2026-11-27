@@ -1,6 +1,8 @@
+using SmartParking.Application.Abstractions;
 using SmartParking.Application.Abstractions.Availability;
 using SmartParking.Application.Abstractions.Documents;
 using SmartParking.Application.Abstractions.Reading;
+using SmartParking.Domain.Facilities;
 using SmartParking.Domain.Occupancy;
 
 namespace SmartParking.Infrastructure;
@@ -11,9 +13,21 @@ namespace SmartParking.Infrastructure;
 /// endpoints answer 501 (F5b). It exists only so the handlers can be built in both modes.
 /// </summary>
 internal sealed class MonolithicAvailabilityPending
-    : IOccupancyProjector, IAvailabilityViewStore, ILatestOccupancyEventReader, IOccupancyEventIndexes
+    : IOccupancyProjector, IAvailabilityViewStore, ILatestOccupancyEventReader, IOccupancyEventIndexes, IAvailabilityReader
 {
     private const string Message = "Availability in the monolithic mode arrives in F9.";
+
+    public Task<Result<IReadOnlyList<FacilityAvailability>>> GetFacilityAsync(
+        Guid facilityId, SpotType? spotType, Guid? zoneId, CancellationToken cancellationToken) =>
+        throw new NotSupportedException(Message);
+
+    public Task<Result<IReadOnlyList<FacilityAvailability>>> GetOperatorFacilitiesAsync(
+        Guid operatorId, SpotType? spotType, Guid? zoneId, CancellationToken cancellationToken) =>
+        throw new NotSupportedException(Message);
+
+    public Task<Result<IReadOnlyList<NearbyFacility>>> SearchAsync(
+        double latitude, double longitude, double radiusMeters, SpotType? spotType, CancellationToken cancellationToken) =>
+        throw new NotSupportedException(Message);
 
     public Task<ProjectionOutcome> ApplyAsync(OccupancyEvent occupancyEvent, bool publishChanges, CancellationToken cancellationToken) =>
         throw new NotSupportedException(Message);

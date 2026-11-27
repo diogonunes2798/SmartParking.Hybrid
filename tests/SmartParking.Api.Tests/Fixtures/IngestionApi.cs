@@ -27,10 +27,14 @@ internal static class IngestionApi
 
     public sealed record Site(CreateFacilityRequest Request, FacilityResponse Facility, ZoneResponse Zone, IReadOnlyList<SpotWithSensor> Spots);
 
-    /// <summary>A facility with one zone and <paramref name="count"/> active spots, each with an active occupancy sensor.</summary>
-    public static async Task<Site> CreateSiteAsync(HttpClient client, int count, CancellationToken cancellationToken)
+    /// <summary>
+    /// A facility with one zone and <paramref name="count"/> active spots, each with an active occupancy sensor.
+    /// <paramref name="request"/> sets the facility (for example its location); a new one by default.
+    /// </summary>
+    public static async Task<Site> CreateSiteAsync(
+        HttpClient client, int count, CancellationToken cancellationToken, CreateFacilityRequest? request = null)
     {
-        var request = FacilityApi.NewRequest();
+        request ??= FacilityApi.NewRequest();
         var (facility, _) = await FacilityApi.CreateAsync(client, cancellationToken, request);
         var (zone, _) = await ConfigurationApi.CreateZoneAsync(client, facility.Id, cancellationToken);
         var hardwareIds = Enumerable.Range(0, count).Select(_ => ConfigurationApi.NewHardwareId()).ToList();

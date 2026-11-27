@@ -48,6 +48,12 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.TryAddSingleton(provider => provider.GetRequiredService<IOptions<IngestionOptions>>().Value.ToPolicy());
 
+        // Shared by both modes: the availability queries' Retry-After (spec 004).
+        services.AddOptions<AvailabilityOptions>()
+            .Bind(configuration.GetSection(AvailabilityOptions.SectionName))
+            .Validate(options => options.IsValid(), AvailabilityOptions.ValidationMessage)
+            .ValidateOnStart();
+
         if (!PersistenceOptions.TryParseMode(configuration[PersistenceOptions.ModeKey], out var mode))
         {
             // Nothing mode-specific to register: ValidateOnStart stops the host with a message naming the key.
@@ -98,6 +104,7 @@ public static class DependencyInjection
         services.AddSingleton<IAvailabilityViewStore>(provider => provider.GetRequiredService<MonolithicAvailabilityPending>());
         services.AddSingleton<ILatestOccupancyEventReader>(provider => provider.GetRequiredService<MonolithicAvailabilityPending>());
         services.AddSingleton<IOccupancyEventIndexes>(provider => provider.GetRequiredService<MonolithicAvailabilityPending>());
+        services.AddSingleton<IAvailabilityReader>(provider => provider.GetRequiredService<MonolithicAvailabilityPending>());
         return services;
     }
 }
