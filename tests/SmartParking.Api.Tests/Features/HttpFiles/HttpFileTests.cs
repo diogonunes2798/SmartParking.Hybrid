@@ -7,7 +7,8 @@ namespace SmartParking.Api.Tests.Features.HttpFiles;
 
 /// <summary>
 /// The <c>tests/http/*.http</c> files have one request for every endpoint under <c>/api</c> (spec 001 AC-23 for
-/// <c>configuration.http</c>; spec 002 AC-20 for <c>sessions.http</c>). Each file covers its own route prefixes,
+/// <c>configuration.http</c>; spec 002 AC-20 for <c>sessions.http</c>; spec 003 AC-18 for <c>ingest.http</c>; spec 004 AC-23
+/// for <c>availability.http</c>). Each file covers its own route prefixes,
 /// with no request to a route that does not exist; together they cover every <c>/api</c> route (plan 002a, proposal 12).
 /// </summary>
 [Collection(ApiCollectionDefinition.Name)]
@@ -19,7 +20,29 @@ public sealed partial class HttpFileTests(ApiFixture fixture)
         ["configuration.http"] = ["/api/facilities", "/api/sensors"],
         ["sessions.http"] = ["/api/users", "/api/sessions", "/api/reservations"],
         ["ingest.http"] = ["/api/ingest"],
+        ["availability.http"] = ["/api/availability"],
     };
+
+    [Fact]
+    public async Task HttpFile_Availability_EachRequestReturnsItsExpectedStatus_AC23()
+    {
+        // Arrange
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = fixture.Hybrid.CreateClient();
+
+        // Act
+        var exchanges = await HttpFileRunner.RunAsync(client, FindHttpFile("availability.http"), cancellationToken);
+
+        // Assert
+        Assert.NotEmpty(exchanges);
+        Assert.All(exchanges, exchange => Assert.NotNull(exchange.Expected));
+        Assert.Empty(exchanges.Where(exchange => exchange.Expected != exchange.Actual)
+            .Select(exchange => $"line {exchange.Line}: {exchange.Request} expected {exchange.Expected}, got {exchange.Actual}"));
+    }
+
+    /// <summary>Spec 004, AC-23.</summary>
+    [Fact]
+    public void HttpFile_EveryAvailabilityEndpoint_HasOneRequest_AC23() => AssertFileCoversItsEndpoints("availability.http");
 
     [Fact]
     public async Task HttpFile_Ingest_EachRequestReturnsItsExpectedStatus_AC18()

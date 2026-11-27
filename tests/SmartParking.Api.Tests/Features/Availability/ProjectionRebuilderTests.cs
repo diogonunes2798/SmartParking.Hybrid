@@ -7,6 +7,7 @@ using SmartParking.Application.Abstractions.Availability;
 using SmartParking.Domain.Occupancy;
 using SmartParking.ProjectionRebuilder;
 using StackExchange.Redis;
+using static SmartParking.Api.Tests.Fixtures.AvailabilityApi;
 using static SmartParking.Api.Tests.Fixtures.AvailabilityView;
 using static SmartParking.Api.Tests.Fixtures.IngestionApi;
 
@@ -183,9 +184,6 @@ public sealed class ProjectionRebuilderTests(ApiFixture fixture)
         // Assert
         Assert.Equal(ExitCodes.NotHybrid, exitCode);
     }
-
-    private static Task<int> RunRebuilderAsync(Isolated environment, CancellationToken cancellationToken) =>
-        RebuilderCommand.Create(environment.Rebuilder).Parse([]).InvokeAsync(cancellationToken: cancellationToken);
 
     private static async Task<List<string>> SnapshotKeysAsync(IConnectionMultiplexer redis) =>
         [.. (await SnapshotAsync(redis, IsolatedRedisDatabase)).Keys];
