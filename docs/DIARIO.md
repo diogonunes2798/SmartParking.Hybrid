@@ -828,3 +828,48 @@ Formato de cada entrada:
   São contagens de verificação, não medições: a duração do *rebuild* mede-se na F12.
 - **Problemas:** a primeira provisão falhou com 409 (`ix_parking_facilities_operator_id_name`), porque a semente 42 já tinha sido usada numa verificação anterior na mesma base de dados. Repetiu-se com a semente 5027.
 - **Decisões:** nenhuma.
+
+## F5b: consultas de disponibilidade (especificação 004)
+
+- **Data:** 2026-11-27
+- **Feito:**
+  - Plano aprovado pelo Diogo na sessão: UC-03; RF-03; RF-04; parte CQRS do RNF-01; AC-13 a AC-21 e AC-23; D10; D2, D3 e D6 não tocadas. Trabalho no ramo `feat/004-consultas-disponibilidade`, que parte da F5a.
+  - Duas decisões do Diogo no plano:
+    - a latitude do ponto de pesquisa de `/nearby` fica limitada a ±85,05112878, o limite do `GeoCoordinate` e do `GEOSEARCH`; especificação 004 revista («API Contract» e AC-18);
+    - o `Retry-After` vem de uma secção própria, `Availability:RetryAfterSeconds`.
+  - Application:
+    - porta `IAvailabilityReader` com os *records* `FacilityAvailability`, `ZoneAvailability` e `NearbyFacility`;
+    - *handlers* `GetAvailability`: 404 só com `facilityId`; lista vazia com outro operador; ordem por nome e id;
+    - *handler* `SearchNearby`: `distance` ou `free`, com desempate pela distância e pelo id, e depois `limit`.
+  - Infrastructure:
+    - `Cache/Availability/AvailabilityReader` faz um número fixo de idas ao Redis por consulta, com os comandos de cada passo num lote: 2 por parque, 3 por operador e 2 por raio (`GEOSEARCH … WITHDIST` e `HMGET`);
+    - `AvailabilityOptions` com `ValidateOnStart`;
+    - o `MonolithicAvailabilityPending` passa a implementar também a porta nova.
+  - Api:
+    - `Features/Availability` com um `IEndpointGroup`, `AllowAnonymous`, `TypedResults`, DTO próprios e validadores FluentValidation; os campos do pedido são anuláveis, para que um campo em falta dê `ValidationProblemDetails`;
+    - o filtro do modo híbrido da ingestão passou a `Common/HybridModeFilterExtensions` e responde 501 antes da validação nos dois *endpoints*. A ingestão continua igual: o seu AC-16 voltou a passar depois da mudança.
+  - Testes em `tests/SmartParking.Api.Tests/Features/Availability/`:
+    - `AvailabilityQueryTests`: AC-13 a AC-15, AC-19 com o PostgreSQL e o MongoDB em portas fechadas, AC-21 incluindo pedidos inválidos, e o *hash* parcial;
+    - `NearbySearchTests`: AC-16 a AC-18, com distâncias pela fórmula de Haversine com o raio da Terra do Redis e tolerância de 1 m, e com os limites aceites;
+    - `AvailabilityUnavailableTests`: AC-20, com as consultas e o projetor;
+    - `tests/http/availability.http` e dois testes AC-23 em `HttpFileTests`;
+    - os AC-13, AC-14, AC-16 e AC-17 constroem a vista pelo *rebuild* real, num ambiente isolado;
+    - o `RunRebuilderAsync` passou para `Fixtures/AvailabilityApi`, e o `CreateSiteAsync` aceita o pedido do parque (localização).
+  - Resultado: `dotnet build` sem avisos; `dotnet format --verify-no-changes` limpo; `dotnet test` com 530 a passar, 0 a falhar e 0 ignorados (Api.Tests, Workers.Tests, ArchitectureTests e UnitTests).
+  - Documentação: ADR 0010 (secção «Consultas (F5b)» e alternativas), `.claude/rules/persistencia.md` (idas fixas por consulta) e RASTREABILIDADE (RF-03 e RF-04).
+- **Problemas:**
+  - O heredoc no Git Bash voltou a falhar ao escrever os ficheiros de Application; passou-se para a ferramenta de escrita.
+  - O AC-20 falhou à primeira: a porta do contentor do Redis lia-se depois de o parar («Exposed port 6379/tcp is not mapped»). Passou a ler-se antes do `StopAsync`.
+  - Um `Assert.Equal` com uma expressão de coleção ficou ambíguo entre `T` e `ReadOnlySpan<T>` (CS0121); passou a comparar a sequência diretamente.
+  - O `hooks/post-test-analyze.sh` não existe neste *worktree*: a primeira corrida completa perdeu o resultado no *pipe* e foi repetida com a saída para um ficheiro.
+  - Revisão independente por um agente separado:
+    - Achado 1 (importante), corrigido: um *hash* de parque ou zona recriado pelo projetor só com contadores, durante um *rebuild*, dava 500 na consulta por parque, enquanto a pesquisa por raio o ignorava. Agora os dois caminhos deixam-no de fora. Há um teste novo.
+    - Achado 2, corrigido: a resposta `LOADING` do Redis (releitura do AOF depois de reiniciar) dá 503 e não 500. Não há teste, porque provocar o `LOADING` num contentor de teste não é determinístico.
+    - Achado 7, corrigido: duas linhas novas no AC-14 (zona de outro parque; operador com zona).
+- **Decisões:** os outros achados da revisão ficam registados, sem correção:
+  - 3: um valor malformado (`lat=abc`, um GUID inválido) falha no *binding* antes dos filtros e dá 400 com ProblemDetails simples. Isto acontece também no modo monolítico, onde não chega ao 501. É o mesmo comportamento da ingestão e dos outros *endpoints* com `[AsParameters]`;
+  - 4: num pedido cancelado, as tarefas do lote em curso ficam por observar; não tem efeito funcional;
+  - 5: no AC-20, a porta do Redis parado pode, em teoria, ser reutilizada por outro contentor; o risco é baixo, com a coleção «Api» em série;
+  - 6: a tolerância de 1 m no AC-16 passou; se algum dia falhar, alarga-se para 2 m com a razão no teste.
+  - A latência do UC-03 (< 200 ms no p95) não foi medida: mede-se na F12.
+- ***Commits:*** `1657f05` (spec), `d31be3f` (filtro do modo), `13fffd2` (consultas e AC-13 a AC-21), `750cb45` (`availability.http`, AC-23), `aaa912e` (achados da revisão), mais o commit desta documentação, todos no ramo `feat/004-consultas-disponibilidade`.

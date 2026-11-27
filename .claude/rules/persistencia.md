@@ -30,6 +30,7 @@ paths:
 - Ordem por lugar: aplica-se um evento só se o par (`timestamp` em milissegundos, `eventId` em minúsculas) for estritamente maior do que o guardado. Leitura, comparação e escrita num único script Lua por evento; nunca ler e escrever em idas separadas.
 - Contadores (`free`, `free:{SpotType}`) só mudam numa transição `Free` ↔ `Occupied`; os totais só mudam no *rebuild*.
 - Canal `availability:changed`: uma mensagem por transição, publicada no mesmo script. O *rebuild* não publica.
+- Consultas da vista (`IAvailabilityReader`): número fixo de idas ao Redis por consulta, com os comandos de cada passo num lote; nunca uma ida por parque, zona ou lugar. Só falhas de ligação e *timeouts* dão 503; sem *fallback* para o PostgreSQL.
 
 ## Sincronização (5.6.2)
 - Outbox → leitor da outbox → `IEventBus` → projetores. Marcar o evento como publicado só depois da publicação.

@@ -4,11 +4,11 @@
 - **Data:** 2026-11-27
 - **Requisitos:**
   - RF-03: estado de ocupação em tempo real, lido só do Redis;
-  - RF-04: índice GEO dos parques (a pesquisa por raio é da F5b);
+  - RF-04: índice GEO dos parques e pesquisa por raio (F5b);
   - RNF-03: a vista reconstrói-se a partir das fontes de verdade; a duração do *rebuild* mede-se na F12.
 - **Decisão (D1–D10):** D3 no valor por omissão (o registo de eventos no MongoDB é a fonte do *rebuild*). D2 não muda: o projetor não tem transporte na F5, e a porta `IOccupancyProjector` é o ponto de extensão da F6. D10: a vista não é um agregado, por isso não tem repositório; a leitura da configuração usa uma porta própria (`IAvailabilityLayoutReader`) com `AsNoTracking`.
 - **Secções da tese:** 5.5.3, 5.7.
-- **Especificação:** [004-disponibilidade](../specs/004-disponibilidade.md), secções «Domain Model», «Edge Cases» e AC-1 a AC-12 e AC-22.
+- **Especificação:** [004-disponibilidade](../specs/004-disponibilidade.md), secções «Domain Model», «API Contract», «Edge Cases» e AC-1 a AC-23.
 
 ## Contexto
 
@@ -28,6 +28,19 @@ A F4 grava os eventos de ocupação no MongoDB, mas o UC-03 precisa de saber qua
 
 - **Latitude limitada no domínio (revisão da F5a, 2026-11-27).** O índice GEO do Redis só aceita latitudes em [−85,05112878, 85,05112878], o limite da projeção Web Mercator. Um parque fora desse intervalo faria falhar o `GEOADD` e, com ele, todos os *rebuilds*, deixando a vista parcial. Por decisão do Diogo, o `GeoCoordinate` passou a aceitar só esse intervalo, e a especificação 001 foi revista. Nenhum parque real fica de fora.
 
+### Consultas (F5b)
+
+- **Porta de leitura própria.** As consultas `GetAvailability` e `SearchNearby` leem por `IAvailabilityReader` (D10: sem repositório no lado da leitura), implementada em `Cache/Availability/AvailabilityReader.cs`. Nenhum caminho de consulta abre uma ligação ao PostgreSQL nem ao MongoDB. O AC-19 prova-o com as duas bases em portas fechadas.
+- **Número fixo de idas ao Redis.** Os comandos de cada passo vão num só lote (*pipeline*), por isso o número de idas não depende do número de parques, zonas ou lugares:
+  - por parque: duas idas, uma para o *hash* do parque e o conjunto das zonas e outra para os *hashes* das zonas;
+  - por operador: mais uma ida antes, para o conjunto dos parques do operador;
+  - por raio: duas idas, uma para o `GEOSEARCH … WITHDIST` e outra para o `HMGET` dos contadores.
+  Um campo ausente vale 0. Uma chave que falte a meio de um *rebuild* deixa o parque ou a zona de fora, sem erro. O mesmo vale para um *hash* sem `name` ou `operatorId`, que o projetor pode recriar só com contadores depois de o *rebuild* o apagar (revisão da F5b, achado 1).
+- **Regras em Application, mecânica em Infrastructure.** A ordenação, o desempate e o `limit` ficam nos *handlers*, tal como o 404 e a lista vazia quando o parque é de outro operador. O leitor devolve os dados da vista sem os ordenar.
+- **Falhas.** Só `RedisConnectionException`, `RedisTimeoutException` e a resposta `LOADING` do Redis passam a `ErrorType.Unavailable`. O Redis responde `LOADING` enquanto relê o AOF depois de reiniciar (o `compose.yaml` liga-o com `--appendonly yes`). a que a Api responde com 503 e `Retry-After`. Qualquer outra exceção é um defeito e chega ao tratador global (500). O `Retry-After` vem de `Availability:RetryAfterSeconds` (por omissão 1, validado no arranque), separado do da ingestão para que cada um se possa ajustar sozinho.
+- **Modo monolítico.** O filtro do modo, partilhado com a ingestão, responde 501 antes da validação, por isso não se lê nada (AC-21).
+- **Latitude do ponto de pesquisa (decisão do Diogo, 2026-11-27).** O `GEOSEARCH` recusa latitudes fora de [−85,05112878, 85,05112878], o mesmo limite do `GeoCoordinate`. Sem o alinhar, uma latitude de 89 chegaria ao Redis e daria 500. O validador usa `GeoCoordinate.IsValidLatitude`, e a especificação 004 foi revista («API Contract» e AC-18).
+
 ## Alternativas consideradas
 
 - **`WATCH`/`MULTI` em vez de Lua.** Também é atómico, mas obriga a repetir a transação quando há conflito e precisa de pelo menos duas idas ao Redis por evento.
@@ -35,6 +48,9 @@ A F4 grava os eventos de ocupação no MongoDB, mas o UC-03 precisa de saber qua
 - **Publicar no `IEventBus` já na F5.** Seria decidir D2 antes da F6.
 - **Troca atómica da vista durante o *rebuild*** (escrever num prefixo novo e trocar no fim). Fica para rever se as medições do RNF-03 na F12 mostrarem que o estado parcial durante o *rebuild* é um problema (especificação 004, ronda 2).
 - **Deixar fora do índice GEO os parques acima do limite**, com um aviso, em vez de limitar o domínio. Manteria a especificação 001, mas esses parques ficariam invisíveis à pesquisa por raio sem que o operador o soubesse.
+- **Um script Lua só de leitura por consulta** (F5b). Faria uma só ida ao Redis, mas a lógica de leitura ficaria escondida num script. Os lotes já garantem um número fixo de idas. Fica para rever se as medições do UC-03 na F12 o justificarem.
+- **`COUNT` no `GEOSEARCH`** (F5b). Reduziria a resposta do Redis com `sort=distance`, mas não serve para `sort=free`, que precisa de todos os parques dentro do raio. O raio está limitado a 50 km.
+- **Limitar a latitude do ponto de pesquisa ao limite do Redis, ou devolver uma lista vazia acima dele** (F5b). Manteria [−90, 90] na especificação. No primeiro caso as distâncias ficariam erradas perto dos polos; no segundo, podiam faltar parques dentro do raio.
 - **Orquestrar o *rebuild* na própria ferramenta**, com acesso direto às três bibliotecas. Seria mais curto, mas duplicaria o código das subcamadas e tiraria o *rebuild* do alcance dos testes de arquitetura.
 
 ## Consequências
