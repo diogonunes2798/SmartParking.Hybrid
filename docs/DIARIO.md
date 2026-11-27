@@ -873,3 +873,20 @@ Formato de cada entrada:
   - 6: a tolerância de 1 m no AC-16 passou; se algum dia falhar, alarga-se para 2 m com a razão no teste.
   - A latência do UC-03 (< 200 ms no p95) não foi medida: mede-se na F12.
 - ***Commits:*** `1657f05` (spec), `d31be3f` (filtro do modo), `13fffd2` (consultas e AC-13 a AC-21), `750cb45` (`availability.http`, AC-23), `aaa912e` (achados da revisão), mais o commit desta documentação, todos no ramo `feat/004-consultas-disponibilidade`.
+
+## F5: integração da F5a e da F5b na `main`
+
+- **Data:** 2026-11-27
+- **Feito:**
+  - *Push* do ramo `feat/004-consultas-disponibilidade` e abertura do [PR #9](https://github.com/diogonunes2798/SmartParking.Hybrid/pull/9) a pedido do Diogo. O PR assentava no [PR #8](https://github.com/diogonunes2798/SmartParking.Hybrid/pull/8) (F5a), que ainda estava aberto.
+  - *Merge* pedido pelo Diogo, pela ordem que ele escolheu, com *merge commits*:
+    - primeiro o PR #8 (`737bd1f`);
+    - depois o PR #9 (`d69d782`).
+  - Assim, cada parte da F5 fica com o seu PR na `main`.
+  - Ramos remotos `feat/004-vista-disponibilidade` e `feat/004-consultas-disponibilidade` apagados a pedido do Diogo; o ramo local da F5b também.
+  - Linhas do RF-03 e do RF-04 da RASTREABILIDADE atualizadas com os dois PR.
+- **Problemas:**
+  - O repositório continua sem integração contínua, por isso os PR não tiveram verificações automáticas. A garantia é a corrida local registada na entrada da F5b: 530 testes a passar, *build* e *format* limpos.
+  - O ramo local `feat/004-vista-disponibilidade` não foi apagado, porque é o que está aberto na cópia principal (`C:\SmartParking.Hybrid`). Já está integrado e pode apagar-se depois de essa cópia mudar de ramo.
+- **Decisões:** *merge commit* em vez de *squash*, para que os *commits* referidos nas entradas da F5a e da F5b continuem a existir na `main`.
+- ***Commits:*** `737bd1f` (*merge* do PR #8) e `d69d782` (*merge* do PR #9); registo desta entrada no *commit* seguinte.
