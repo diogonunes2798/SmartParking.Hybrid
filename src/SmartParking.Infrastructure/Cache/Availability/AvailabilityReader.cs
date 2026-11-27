@@ -16,7 +16,8 @@ namespace SmartParking.Infrastructure.Cache.Availability;
 /// match; (2) the counters of the matched facilities.</item>
 /// </list>
 /// A field absent from a hash counts 0 (a spot type the facility does not have). A key missing while a rebuild runs
-/// leaves its facility or zone out. Only connection failures and timeouts become <see cref="ErrorType.Unavailable"/>;
+/// leaves its facility or zone out, and so does a hash without its name or operator (a counter the projector recreated
+/// after the rebuild removed the hash). Only connection failures, timeouts and LOADING become <see cref="ErrorType.Unavailable"/>;
 /// anything else is a bug and propagates.
 /// </summary>
 internal sealed class AvailabilityReader(RedisConnection redis) : IAvailabilityReader
@@ -62,7 +63,7 @@ internal sealed class AvailabilityReader(RedisConnection redis) : IAvailabilityR
                 for (var index = 0; index < matches.Length; index++)
                 {
                     var values = await reads[index];
-                    if (values[0].IsNull)
+                    if (values[0].IsNull || values[1].IsNull)
                     {
                         continue;
                     }
@@ -95,17 +96,17 @@ internal sealed class AvailabilityReader(RedisConnection redis) : IAvailabilityR
         batch.Execute();
         await Task.WhenAll([.. facilityReads, .. zoneSetReads]).WaitAsync(cancellationToken);
 
-        List<(Guid Id, Dictionary<string, RedisValue> Hash, Guid[] ZoneIds)> facilities = [];
+        List<(Guid Id, string Name, Guid OperatorId, Dictionary<string, RedisValue> Hash, Guid[] ZoneIds)> facilities = [];
         for (var index = 0; index < facilityIds.Count; index++)
         {
-            var hash = await facilityReads[index];
-            if (hash.Length == 0)
+            var hash = ToDictionary(await facilityReads[index]);
+            if (!hash.TryGetValue(AvailabilityKeys.NameField, out var name) || !hash.TryGetValue(AvailabilityKeys.OperatorIdField, out var operatorId))
             {
                 continue;
             }
 
             var zoneIds = (await zoneSetReads[index]).Select(ToGuid).Where(id => zoneId is not { } only || id == only).ToArray();
-            facilities.Add((facilityIds[index], ToDictionary(hash), zoneIds));
+            facilities.Add((facilityIds[index], name.ToString(), ToGuid(operatorId), hash, zoneIds));
         }
 
         // Step 2: the zone hashes of every facility found, in one batch.
@@ -119,9 +120,10 @@ internal sealed class AvailabilityReader(RedisConnection redis) : IAvailabilityR
             await Task.WhenAll(zoneReads).WaitAsync(cancellationToken);
             for (var index = 0; index < zoneIdsToRead.Length; index++)
             {
-                if (await zoneReads[index] is { Length: > 0 } hash)
+                var hash = ToDictionary(await zoneReads[index]);
+                if (hash.ContainsKey(AvailabilityKeys.NameField))
                 {
-                    zones[zoneIdsToRead[index]] = ToDictionary(hash);
+                    zones[zoneIdsToRead[index]] = hash;
                 }
             }
         }
@@ -131,8 +133,8 @@ internal sealed class AvailabilityReader(RedisConnection redis) : IAvailabilityR
         [
             .. facilities.Select(facility => new FacilityAvailability(
                 facility.Id,
-                facility.Hash[AvailabilityKeys.NameField].ToString(),
-                ToGuid(facility.Hash[AvailabilityKeys.OperatorIdField]),
+                facility.Name,
+                facility.OperatorId,
                 Count(facility.Hash, free),
                 Count(facility.Hash, total),
                 [
@@ -160,6 +162,11 @@ internal sealed class AvailabilityReader(RedisConnection redis) : IAvailabilityR
         }
         catch (RedisTimeoutException)
         {
+            return Unavailable<T>();
+        }
+        catch (RedisServerException exception) when (exception.Message.StartsWith("LOADING", StringComparison.Ordinal))
+        {
+            // Redis answers LOADING while it replays the AOF after a restart (compose runs it with --appendonly yes).
             return Unavailable<T>();
         }
     }

@@ -48,6 +48,8 @@ public sealed class AvailabilityQueryTests(ApiFixture fixture)
     [InlineData("spotType=Standard")]
     [InlineData("zoneId")]
     [InlineData("operatorId")]
+    [InlineData("zoneIdOfAnotherFacility")]
+    [InlineData("operatorId+zoneId")]
     [InlineData("facilityId+otherOperatorId")]
     [InlineData("operatorWithoutFacilities")]
     public async Task GetAvailability_Filters_FollowTheContract_AC14(string filter)
@@ -72,6 +74,10 @@ public sealed class AvailabilityQueryTests(ApiFixture fixture)
                 Expect(facilityId, (2, 4), (zone2, 1, 2))),
             "operatorId" => ($"operatorId={Operator.ReferenceOperatorId}",
                 Expect(facilityId, (2, 4), (zone1, 1, 2), (zone2, 1, 2))),
+            "zoneIdOfAnotherFacility" => ($"facilityId={facilityId}&zoneId={Guid.NewGuid()}",
+                Expect(facilityId, (2, 4))),
+            "operatorId+zoneId" => ($"operatorId={Operator.ReferenceOperatorId}&zoneId={zone2}",
+                Expect(facilityId, (2, 4), (zone2, 1, 2))),
             "facilityId+otherOperatorId" => ($"facilityId={facilityId}&operatorId={Guid.NewGuid()}", Array.Empty<string>()),
             "operatorWithoutFacilities" => ($"operatorId={Guid.NewGuid()}", Array.Empty<string>()),
             _ => throw new ArgumentOutOfRangeException(nameof(filter)),
@@ -146,6 +152,47 @@ public sealed class AvailabilityQueryTests(ApiFixture fixture)
         Assert.Equal([(zoneId, "Zone A", 2, 2)], facility.Zones.Select(zone => (zone.ZoneId, zone.Name, zone.Free, zone.Total)));
         var found = Assert.Single(nearby.Facilities);
         Assert.Equal((facilityId, 2, 2), (found.FacilityId, found.Free, found.Total));
+    }
+
+    [Fact]
+    public async Task Queries_HashWithoutNameOrOperator_LeaveItOut()
+    {
+        // Arrange: «Rebuild a meio» (spec 004): the projector can recreate a facility or zone hash with counters only
+        // after the clear removed it (review of F5b, finding 1). Such a hash is not in the view.
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var settings = fixture.Databases.Settings(PersistenceMode.Hybrid);
+        settings["ConnectionStrings:Redis"] = fixture.Databases.Redis.GetConnectionString() + $",defaultDatabase={IsolatedRedisDatabase}";
+        await using var factory = ApiFixture.CreateFactory(settings);
+        using var client = factory.CreateClient();
+        await using var redis = await ConnectAsync(fixture);
+        var database = redis.GetDatabase(IsolatedRedisDatabase);
+
+        var (facilityId, zoneId, operatorId, partialId) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var store = factory.Services.GetRequiredService<IAvailabilityViewStore>();
+        await store.ClearAsync(cancellationToken);
+        await store.SeedAsync(
+            new AvailabilityLayout(
+            [
+                new FacilityLayout(facilityId, "Whole", operatorId, 40.2033, -8.4103,
+                    [new ZoneLayout(zoneId, "Zone A")], [new SpotLayout(Guid.NewGuid(), zoneId, SpotType.Standard)]),
+            ]),
+            cancellationToken);
+        await database.KeyDeleteAsync($"avail:zone:{Id(zoneId)}");
+        await database.HashSetAsync($"avail:zone:{Id(zoneId)}", "free", 0);
+        await database.HashSetAsync($"avail:facility:{Id(partialId)}", "free", 0);
+        await database.SetAddAsync($"avail:operator:{Id(operatorId)}:facilities", Id(partialId));
+        await database.GeoAddAsync("avail:geo:facilities", -8.4103, 40.2033, Id(partialId));
+
+        // Act
+        var byOperator = await GetOkAsync(client, $"operatorId={operatorId}", cancellationToken);
+        using var byPartial = await GetAsync(client, $"facilityId={partialId}", cancellationToken);
+        var nearby = await NearbyOkAsync(client, "lat=40.2033&lon=-8.4103&radiusMeters=100", cancellationToken);
+
+        // Assert
+        var facility = Assert.Single(byOperator.Facilities);
+        Assert.Equal((facilityId, 0), (facility.FacilityId, facility.Zones.Count));
+        Assert.Equal(HttpStatusCode.NotFound, byPartial.StatusCode);
+        Assert.Equal([facilityId], nearby.Facilities.Select(found => found.FacilityId));
     }
 
     [Theory]
