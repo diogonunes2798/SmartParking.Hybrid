@@ -1,6 +1,6 @@
 # Spec 004: Vista de disponibilidade e pesquisa geoespacial
 
-**Status:** Approved (2026-11-27)
+**Status:** Approved (2026-11-27); revista a 2026-11-27 no plano da F5b (latitude do ponto de pesquisa de `/nearby` limitada a ±85,05112878, decisão do Diogo; ADR 0010)
 **Date:** 2026-11-27
 **Fase:** F5 · **Secção da tese:** 5.5.3, 5.7 · **Requisitos:** UC-03; RF-03, RF-04 · **Depende de:** F4 (spec 003, registo de eventos no MongoDB)
 
@@ -113,7 +113,7 @@ Todas as chaves usam o prefixo `avail:` (ronda 5).
 - 404 só com `facilityId` de um parque que não está na vista; um `operatorId` sem parques dá lista vazia.
 
 `GET /api/availability/nearby` (ronda 3):
-- Limites fixos: `lat` ∈ [−90, 90]; `lon` ∈ [−180, 180]; `radiusMeters` obrigatório, de 1 a 50 000; `sort` por omissão `distance`; `limit` de 1 a 100, por omissão 20; `spotType` opcional.
+- Limites fixos: `lat` ∈ [−85,05112878; 85,05112878] (o limite do GEO do Redis e do `GeoCoordinate` do domínio; revisão de 2026-11-27, plano da F5b); `lon` ∈ [−180, 180]; `radiusMeters` obrigatório, de 1 a 50 000; `sort` por omissão `distance`; `limit` de 1 a 100, por omissão 20; `spotType` opcional.
 - Cada parque: `facilityId`, `name`, `operatorId`, `distanceMeters`, `free`, `total` (do tipo pedido, se houver `spotType`).
 - `sort=distance`: distância crescente. `sort=free`: lugares livres decrescentes, com desempate pela distância.
 - Entram os parques ativos dentro do raio, incluindo os que têm 0 lugares livres.
@@ -187,7 +187,7 @@ Cada AC tem um teste com o seu número no nome. Os testes usam o PostgreSQL, o M
 - **AC-15 (validação e 404).** Dado um pedido sem `facilityId` nem `operatorId`, com `spotType` inválido, ou com um `facilityId` que não está na vista, então a resposta é 400 com `ValidationProblemDetails` nos dois primeiros e 404 com ProblemDetails no terceiro.
 - **AC-16 (raio por distância).** Dados quatro parques ativos a distâncias conhecidas de um ponto e um parque inativo dentro do raio, quando se pede `GET /api/availability/nearby` com um raio que apanha três ativos, então a resposta tem esses três, ordenados por distância crescente, com `distanceMeters`, e não tem o inativo nem o que está fora do raio.
 - **AC-17 (raio por livres e limite).** Dados os mesmos parques com números de lugares livres diferentes e dois com o mesmo número, quando se pede `sort=free` e `limit=2`, então vêm os dois com mais lugares livres, com o empate resolvido pela distância.
-- **AC-18 (validação do raio).** Dados `lat`, `lon`, `radiusMeters`, `sort` e `limit` fora dos limites, ou `radiusMeters` ausente, quando se pede, então a resposta é 400 com `ValidationProblemDetails`. Teste em tabela.
+- **AC-18 (validação do raio).** Dados `lat` (incluindo acima de 85,05112878 ou abaixo de −85,05112878), `lon`, `radiusMeters`, `sort` e `limit` fora dos limites, ou `radiusMeters` ausente, quando se pede, então a resposta é 400 com `ValidationProblemDetails`. Teste em tabela.
 - **AC-19 (sem PostgreSQL).** Dada uma Api de teste com a ligação ao PostgreSQL apontada para uma porta fechada e a vista preenchida, quando se pedem os dois *endpoints*, então ambos respondem 200 com os dados do Redis.
 - **AC-20 (Redis indisponível).** Dado o contentor do Redis parado, quando se pedem os dois *endpoints*, então a resposta é 503 com ProblemDetails e `Retry-After`; e o projetor lança a exceção ao chamador.
 - **AC-21 (modo monolítico).** Dada a Api em `Persistence:Mode=Monolithic`, quando se pedem os dois *endpoints*, então a resposta é 501 com ProblemDetails.
