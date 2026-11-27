@@ -1,0 +1,42 @@
+### Consultas de disponibilidade (UC-03, RF-03, RF-04, especificação 004)
+# Lê só a vista de disponibilidade no Redis. Para ver números, corre-se primeiro o ProjectionRebuilder
+# (dotnet run --project tools/ProjectionRebuilder), que reconstrói a vista a partir do PostgreSQL e do MongoDB.
+# Os estados esperados («# @expect») não dependem do conteúdo da vista: o teste HttpFileTests (AC-23)
+# executa o ficheiro contra a Api de teste e confirma cada estado.
+# Pré-requisitos: docker compose up -d --wait; migrações; scripts/db-app-user.sh; Api a correr.
+
+@baseUrl = http://localhost:5080
+# Operador de referência do protótipo (spec 001).
+@operatorId = 0193a1b0-0000-7000-8000-000000000001
+
+########################################################################## Por parque, zona e tipo
+
+### Parques do operador, com os lugares livres por zona
+# @expect 200
+GET {{baseUrl}}/api/availability?operatorId={{operatorId}}
+
+### Só os lugares acessíveis dos parques do operador
+# @expect 200
+GET {{baseUrl}}/api/availability?operatorId={{operatorId}}&spotType=Accessible
+
+### Parque que não está na vista: 404 com ProblemDetails
+# @expect 404
+GET {{baseUrl}}/api/availability?facilityId={{$guid}}
+
+### Sem facilityId nem operatorId: 400 com ValidationProblemDetails
+# @expect 400
+GET {{baseUrl}}/api/availability?spotType=Standard
+
+########################################################################## Pesquisa por raio
+
+### Parques a menos de 2 km da Baixa de Coimbra, por distância
+# @expect 200
+GET {{baseUrl}}/api/availability/nearby?lat=40.2033&lon=-8.4103&radiusMeters=2000
+
+### Os 5 com mais lugares livres para veículos elétricos, num raio de 10 km
+# @expect 200
+GET {{baseUrl}}/api/availability/nearby?lat=40.2033&lon=-8.4103&radiusMeters=10000&sort=free&limit=5&spotType=ElectricVehicle
+
+### Latitude fora do intervalo do GEO do Redis (±85,05112878): 400
+# @expect 400
+GET {{baseUrl}}/api/availability/nearby?lat=89&lon=0&radiusMeters=1000
