@@ -812,3 +812,19 @@ Formato de cada entrada:
   - 7: o teste do AC-12 corre ao mesmo tempo que o inicializador do *host*;
   - 8: as bases de dados dos testes não são apagadas, e a base 1 do Redis só é segura porque a coleção "Api" corre em série;
   - 9: o `catch (Exception)` da ferramenta é uma exceção à regra do CLAUDE.md, justificada por ser o limite do processo.
+
+## F5a: verificação manual contra o `compose.yaml`
+
+- **Data:** 2026-11-27
+- **Feito:** a pedido do Diogo, verificação ponta a ponta no ambiente local (`docker compose up -d --wait`). As cadeias de ligação foram montadas a partir do `.env` só no processo, sem as mostrar: a Api como `smartparking_api` e a ferramenta como `smartparking_workers`.
+  - `SensorSimulator --provision --spots 200 --zones 5 --seed 5027` registou o parque `01a21d53-c5af-7dff-a5d5-f646b0c4677b`.
+  - Uma emissão de 2 min (`--mean-interval 30 --seed 5027`) terminou com 828 eventos aceites, sem duplicados, rejeitados nem repetições.
+  - `ProjectionRebuilder` corrido duas vezes, ambas com código 0: 6 parques, 13 zonas e 223 lugares ativos (incluindo os parques de verificações anteriores), 220 últimos eventos lidos, todos `applied`.
+  - Impressão digital da vista, lida por um script Lua só de leitura (chaves `avail:*` ordenadas, valores ordenados, SHA-1): igual nas duas execuções, com 249 chaves e 126 lugares ocupados.
+  - Confronto com o MongoDB no parque provisionado: o último evento é `Occupied` em 116 lugares e `Freed` em 83; o lugar restante não teve eventos e conta como livre. Dá 84 livres em 200, que é o `free`/`total` do hash do parque no Redis.
+  - O `explain` da agregação do *rebuild* usa o índice `spotId_1_timestamp_-1__id_-1` com `DISTINCT_SCAN` e sem `COLLSCAN`. Fica fechado o risco do plano.
+  - O inicializador criou o índice no arranque da Api sem `Warning`.
+
+  São contagens de verificação, não medições: a duração do *rebuild* mede-se na F12.
+- **Problemas:** a primeira provisão falhou com 409 (`ix_parking_facilities_operator_id_name`), porque a semente 42 já tinha sido usada numa verificação anterior na mesma base de dados. Repetiu-se com a semente 5027.
+- **Decisões:** nenhuma.
