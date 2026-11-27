@@ -31,6 +31,11 @@ internal static class DocumentsRegistration
         services.AddSingleton<OccupancyEventsCollection>();
         services.AddSingleton<IOccupancyEventLog, MongoOccupancyEventLog>();
 
+        // Read side of the log for the availability rebuild, and its index (spec 004).
+        services.AddSingleton<IOccupancyEventIndexes, OccupancyEventIndexes>();
+        services.AddSingleton<ILatestOccupancyEventReader, LatestOccupancyEventReader>();
+        services.AddHostedService<DocumentsInitializer>();
+
         healthChecks.AddMongoDb(
             sp => sp.GetRequiredService<IMongoClient>(),
             name: HealthCheckName,

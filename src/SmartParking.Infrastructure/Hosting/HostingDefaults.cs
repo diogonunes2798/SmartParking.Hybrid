@@ -1,3 +1,4 @@
+using SmartParking.Application.Features.Availability;
 using SmartParking.Application.Features.Ingestion;
 using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
@@ -71,6 +72,7 @@ public static class HostingDefaults
                 .AddHttpClientInstrumentation())
             .WithMetrics(metrics => metrics
                 .AddMeter(IngestionMetrics.MeterName)
+                .AddMeter(AvailabilityMetrics.MeterName)
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation())

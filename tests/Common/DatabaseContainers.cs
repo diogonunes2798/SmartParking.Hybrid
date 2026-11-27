@@ -104,7 +104,7 @@ public sealed class DatabaseContainers : IAsyncLifetime
             await RelationalDatabase.MigrateAsync(owner, cancellationToken);
         }
 
-        return new IsolatedDatabase(owner, WithLogin(owner, AppLogin, appPassword));
+        return new IsolatedDatabase(owner, WithLogin(owner, AppLogin, appPassword), WithLogin(owner, WorkersLogin, workersPassword));
     }
 
     private static string WithLogin(string connectionString, string username, string password) =>

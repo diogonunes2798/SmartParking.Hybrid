@@ -63,6 +63,9 @@ internal static class RelationalRegistration
         // Ingestion registry check (spec 003): one compiled query per batch, the same in both modes.
         services.AddScoped<ISensorRegistryReader, SensorRegistryReader>();
 
+        // Configuration read by the availability rebuild (spec 004); in both modes, like every relational port.
+        services.AddScoped<IAvailabilityLayoutReader, AvailabilityLayoutReader>();
+
         healthChecks.AddNpgSql(
             sp => sp.GetRequiredService<NpgsqlDataSource>(),
             name: HealthCheckName,

@@ -21,7 +21,7 @@ public sealed class IngestionMetricsTests(ApiFixture fixture)
         var accepted = Event(site.Spots[0], Past);
         var duplicate = Event(site.Spots[0], Past, eventId: IdOf(accepted));
         var unknown = Event(ConfigurationApi.NewHardwareId(), site.Spots[0].SpotId, Past);
-        using var recorder = new IngestionMeterRecorder(factory.Services);
+        using var recorder = new MeterRecorder(factory.Services, IngestionMetrics.MeterName);
 
         // Act
         await PostOkAsync(client, Batch(accepted, duplicate, unknown), cancellationToken);

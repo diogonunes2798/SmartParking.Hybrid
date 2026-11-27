@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using SmartParking.Application.Abstractions.Availability;
+using SmartParking.Infrastructure.Cache.Availability;
 
 namespace SmartParking.Infrastructure.Cache;
 
@@ -20,6 +22,10 @@ internal static class CacheRegistration
             ?? throw new InvalidOperationException($"ConnectionStrings:{ConnectionStringName} is not configured.");
 
         services.AddSingleton(_ => new RedisConnection(connectionString));
+
+        // Availability view (spec 004). Registered in every hybrid host; nothing invokes the projector until F6.
+        services.AddSingleton<IOccupancyProjector, OccupancyProjector>();
+        services.AddSingleton<IAvailabilityViewStore, AvailabilityViewStore>();
 
         healthChecks.AddCheck<RedisHealthCheck>(
             HealthCheckName,

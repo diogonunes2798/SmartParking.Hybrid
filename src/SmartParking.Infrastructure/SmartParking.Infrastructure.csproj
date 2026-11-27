@@ -34,6 +34,8 @@
 
   <ItemGroup Label="Cache">
     <PackageReference Include="StackExchange.Redis" />
+    <!-- Lua scripts of the availability view (spec 004). -->
+    <EmbeddedResource Include="Cache\Availability\*.lua" LogicalName="Lua.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup Label="Hosting">

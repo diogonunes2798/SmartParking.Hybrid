@@ -1,27 +1,26 @@
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
-using SmartParking.Application.Features.Ingestion;
 
 namespace SmartParking.Api.Tests.Fixtures;
 
 /// <summary>
-/// Records the measurements of the <c>SmartParking.Ingestion</c> meter of one test host (spec 003, AC-17), with the BCL
+/// Records the measurements of one meter of one test host (spec 003, AC-17; spec 004, AC-22), with the BCL
 /// <see cref="MeterListener"/>. Other hosts in the process create their own instance of the same meter name, so only
 /// the instruments of this host's <see cref="IMeterFactory"/> are listened to.
 /// </summary>
-internal sealed class IngestionMeterRecorder : IDisposable
+internal sealed class MeterRecorder : IDisposable
 {
     private readonly MeterListener listener;
     private readonly List<Measurement> measurements = [];
 
-    public IngestionMeterRecorder(IServiceProvider services)
+    public MeterRecorder(IServiceProvider services, string meterName)
     {
         var meterFactory = services.GetRequiredService<IMeterFactory>();
         listener = new MeterListener
         {
             InstrumentPublished = (instrument, meterListener) =>
             {
-                if (instrument.Meter.Name == IngestionMetrics.MeterName && ReferenceEquals(instrument.Meter.Scope, meterFactory))
+                if (instrument.Meter.Name == meterName && ReferenceEquals(instrument.Meter.Scope, meterFactory))
                 {
                     meterListener.EnableMeasurementEvents(instrument);
                 }
