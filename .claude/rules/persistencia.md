@@ -17,6 +17,7 @@ paths:
 ## MongoDB (grupo 2, PA/EC)
 - Coleção do registo de eventos só por acréscimo (Event Sourcing mínimo, D3). Nunca alterar um evento: um facto novo é um evento novo.
 - Índice composto `{ facilityId: 1, timestamp: 1 }`, índice único em `eventId` e índice `2dsphere` na localização.
+- Cada fase cria o índice da consulta que introduz (especificação 003, ronda 6). F5: `{ spotId: 1, timestamp: -1, _id: -1 }` para o último evento por lugar do *rebuild*, criado de forma idempotente (`OccupancyEventIndexes`). O `_id` já é o `eventId`, por isso não há índice único extra.
 - Chave de *sharding* prevista: parque + janela temporal (5.6.1). Não usar a zona.
 - Retenção (5.6.3, RNF-05): eventos com mais de 90 dias são agregados, comprimidos e arquivados; o índice TTL só apaga eventos já arquivados.
 - Correr em replica set (também no `compose.yaml`) para o cenário de falha de nó (RNF-03).
@@ -25,6 +26,10 @@ paths:
 - Hash por lugar com o estado atual; contadores de lugares livres por parque e por zona; índice GEO dos parques; canal pub/sub de alterações; Redis Streams no barramento (D2).
 - O Redis não é fonte de verdade: tudo o que lá está tem de poder ser reconstruído a partir do MongoDB e do PostgreSQL (`tools/ProjectionRebuilder`).
 - Sem política de retenção: cada evento substitui o estado anterior.
+- Vista de disponibilidade (especificação 004, ADR 0010): todas as chaves com o prefixo `avail:` (lugar, parque, zona, conjuntos de zonas e de parques do operador, GEO). Nenhuma outra funcionalidade escreve nesse prefixo; o *rebuild* apaga-o por `SCAN` + `UNLINK` e não toca noutras chaves.
+- Ordem por lugar: aplica-se um evento só se o par (`timestamp` em milissegundos, `eventId` em minúsculas) for estritamente maior do que o guardado. Leitura, comparação e escrita num único script Lua por evento; nunca ler e escrever em idas separadas.
+- Contadores (`free`, `free:{SpotType}`) só mudam numa transição `Free` ↔ `Occupied`; os totais só mudam no *rebuild*.
+- Canal `availability:changed`: uma mensagem por transição, publicada no mesmo script. O *rebuild* não publica.
 
 ## Sincronização (5.6.2)
 - Outbox → leitor da outbox → `IEventBus` → projetores. Marcar o evento como publicado só depois da publicação.
