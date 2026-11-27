@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Rebuilds the Redis availability view from PostgreSQL and MongoDB (spec 004, RNF-03). It only composes the ports of
+       Application and the implementations of Infrastructure: no direct use of a database driver (ArchitectureTests). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>SmartParking.ProjectionRebuilder</RootNamespace>
+    <AssemblyName>ProjectionRebuilder</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SmartParking.Application\SmartParking.Application.csproj" />
+    <ProjectReference Include="..\..\src\SmartParking.Infrastructure\SmartParking.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Not appsettings.json: the test project references this tool and the Api, and their files would collide in its output. -->
+    <Content Include="projectionrebuilder.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SmartParking.Api.Tests" />
+    <InternalsVisibleTo Include="SmartParking.ArchitectureTests" />
+  </ItemGroup>
+
+</Project>

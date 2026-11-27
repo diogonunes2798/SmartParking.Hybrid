@@ -755,3 +755,76 @@ Formato de cada entrada:
 - **Problemas:** nenhum. O código (`PayloadRules`) e os testes já seguiam a regra desde a correção do achado 1; só muda o documento, para que diga o que o código já faz.
 - **Decisões:** a especificação continua aprovada; a alteração é uma regra sobre o conteúdo do `payload`, não um AC novo nem uma mudança ao formato comum do evento. Deixa de haver `TODO(Diogo)` em aberto na especificação 003.
 - ***Commits:*** esta entrada e a alteração à especificação, num só *commit* na `main`.
+
+## F5a: vista de disponibilidade e reconstrução (especificação 004)
+
+- **Data:** 2026-11-27
+- **Feito:**
+  - Plano aprovado pelo Diogo na sessão (UC-03; RF-03; RF-04 na parte GEO; prepara o RNF-03; AC-1 a AC-12 e AC-22; D3 no valor por omissão, D2 não tocada, D10), no ramo `feat/004-vista-disponibilidade`.
+  - Application:
+    - portas `IOccupancyProjector` e `IAvailabilityViewStore` (Cache), `IAvailabilityLayoutReader` (Relational, só no *rebuild*), `ILatestOccupancyEventReader` e `IOccupancyEventIndexes` (Documents), separadas do `IOccupancyEventLog`, que continua só com `AppendAsync`;
+    - `AvailabilityMetrics` (`Meter` `SmartParking.Availability`: `availability.projector.events` por resultado e `availability.rebuild.duration`), exportado por OTLP na Api e no Workers;
+    - *handler* `RebuildAvailability`: cria o índice, apaga a vista, escreve a configuração ativa com todos os lugares livres e aplica o último evento de cada lugar pelo mesmo projetor, sem publicar, com até 32 chamadas em paralelo.
+  - Infrastructure:
+    - `Cache/Availability/ApplyOccupancyEvent.lua` (recurso embebido): um script por evento faz a leitura, a comparação do par (`timestamp` em milissegundos, `eventId` em minúsculas), os contadores e o `PUBLISH` de `availability:changed`;
+    - `OccupancyProjector` e `AvailabilityViewStore` (`SCAN` + `UNLINK` na base de dados da ligação; um lote por parque);
+    - `Documents/OccupancyEventIndexes` (`{ spotId: 1, timestamp: -1, _id: -1 }`), `DocumentsInitializer` (cria o índice no arranque em segundo plano; uma falha fica em `Warning`) e `LatestOccupancyEventReader` (`$sort` + `$group` com `$first` + `$replaceRoot`);
+    - `Relational/Reading/AvailabilityLayoutReader` (três projeções `AsNoTracking`, agrupadas em memória);
+    - `MonolithicAvailabilityPending`, para o *handler* se construir também no modo monolítico (como o registo de eventos da F4).
+  - `tools/ProjectionRebuilder`: `System.CommandLine` e *host* genérico, com a configuração em `projectionrebuilder.json` e variáveis de ambiente `ConnectionStrings__*` (*login* `smartparking_workers`, ronda 6). Códigos de saída: 0 sucesso, 3 modo não híbrido, 4 falha do *rebuild*, 130 cancelado. Uma linha `Information` com as contagens e a duração.
+  - Testes em `tests/SmartParking.Api.Tests/Features/Availability/`:
+    - projetor (AC-1 a AC-8) sobre a Api partilhada, com a vista do parque do teste escrita pelo `IAvailabilityViewStore`;
+    - *rebuild* (AC-9 a AC-11 e recusa do modo monolítico) num ambiente isolado: base PostgreSQL própria, base MongoDB própria e a base 1 do Redis, com a ferramenta invocada no processo;
+    - índice (AC-12) e métricas (AC-22: os quatro resultados do projetor e um valor no histograma da duração);
+    - no AC-7, uma mensagem de um segundo lugar serve de sentinela: as mensagens de um publicador num canal chegam por ordem, por isso, quando a sentinela chega, as anteriores já chegaram;
+    - no AC-10, três eventos no mesmo instante com fração de milissegundo, aplicados por ordem inversa do `eventId`.
+  - `ArchitectureTests/Features/RebuilderIsolationTests`: a ferramenta não usa nenhuma biblioteca de base de dados diretamente.
+  - Contagem de testes: os 15 da vista passaram à primeira; a solução completa deu 481 a passar e 0 a falhar.
+  - Testes de mutação, os dois detetados:
+    - desempate do `eventId` invertido no Lua: falham o AC-4 e o AC-10;
+    - `timestamp` guardado em *ticks* em vez de milissegundos: falham o AC-1 e o AC-10.
+  - Roslyn (`detect_antipatterns`): nada em `src/`. Ficam o AP009 nos testes (o *token* vem do `TestContext`, como nos outros testes), no `Main` da ferramenta, e o `catch (Exception)` da ferramenta, que é o limite do processo e tem `#pragma` com a justificação.
+  - Documentação: ADR 0010, `.claude/rules/persistencia.md` (Redis e índice da F5), RASTREABILIDADE (RF-03 e RF-04).
+- **Problemas:**
+  - A primeira corrida dos testes falhou nos 15, antes de correr: o Docker Desktop não estava ligado. Arrancado a partir da sessão, não chegou a ficar de pé; o Diogo ligou-o à mão.
+  - O `appsettings.json` da ferramenta colidiria com o da Api na pasta de saída do projeto de testes, que referencia os dois. Passou a `projectionrebuilder.json`, lido com `DisableDefaults` para manter a ordem ficheiro → ambiente → valores dos testes.
+  - O AC-9 não compilou à primeira (CS4007): uma expressão de coleção dentro de `Assert.Equal` com um `await` como segundo argumento cria um `ReadOnlySpan` que não atravessa o `await`. Os valores esperados passaram para variáveis locais.
+  - O *handler* deixou de devolver `Error.Unavailable` como estava no plano: Application não reconhece as exceções do Redis, do MongoDB nem do PostgreSQL. As falhas sobem e a ferramenta apanha-as no limite do processo (código 4); o *rebuild* é idempotente, por isso a resposta é voltar a correr.
+  - O `IngestionMeterRecorder` passou a `MeterRecorder`, com o nome do `Meter` como parâmetro, para servir os dois `Meter`; e o `IsolatedDatabase` ganhou a ligação do *login* dos Workers.
+  - A ferramenta ainda não exporta métricas por OTLP (o `HostingDefaults` é só para `WebApplicationBuilder`). A duração fica no *log* e no `Meter`; a exportação para a F12 decide-se quando houver os cenários de medição.
+- **Decisões:** ver ADR 0010 (Lua por evento, milissegundos, desempate pelo texto do UUID, chaves derivadas no script, *rebuild* em Application, índice criado no arranque sem derrubar o *host*). Não foi feita a verificação manual contra o `compose.yaml` nem o `explain` da agregação do último evento (risco do plano); ficam para a revisão da F5a.
+- ***Commits:*** no ramo `feat/004-vista-disponibilidade`.
+
+## F5a: revisão independente e latitude limitada
+
+- **Data:** 2026-11-27
+- **Feito:**
+  - Revisão independente do diff da F5a por um agente separado. Não encontrou erros que afetem os AC; confirmou no código a paridade do AC-10 (milissegundos e ordem dos GUID no MongoDB), o tratamento dos campos em falta no Lua, a concorrência do *rebuild* e os tempos de vida no DI.
+  - Achado 1 (importante), confirmado: o domínio aceitava latitudes em [−90, 90], mas o `GEOADD` do Redis recusa fora de [−85,05112878, 85,05112878]. Um só parque nessa faixa fazia falhar todos os *rebuilds* e deixava a vista parcial. Por decisão do Diogo, o `GeoCoordinate` passou a esse intervalo; o validador da Api usa as mesmas constantes. Especificação 001 revista (tabela do domínio e AC-17) e ADR 0010 atualizado.
+  - Testes: limites aceites e valores logo acima recusados no `GeoCoordinate`; o AC-17 da 001 usa agora 85,1; um parque exatamente no limite entra no índice GEO e o *rebuild* termina com sucesso.
+- **Problemas:** a spec 004 ainda diz `lat` ∈ [−90, 90] para o ponto de pesquisa de `GET /api/availability/nearby`. O `GEOSEARCH` recusa o mesmo intervalo, por isso a validação desse ponto tem de seguir o novo limite na F5b (fica para o plano da F5b).
+- **Decisões:** os outros achados ficam registados, sem correção nesta fase:
+  - 2: a comparação de texto no Lua usa `strcoll`; com o *locale* C da imagem é a ordem de bytes que o ADR 0010 pressupõe;
+  - 3: na F6 o projetor deve receber só eventos já gravados no registo, ou um `eventId` repetido com outro `timestamp` faria divergir o estado;
+  - 4: lugares inativos e lugares que mudaram de zona dão o mesmo resultado nos dois caminhos (comportamento da spec);
+  - 5: as três consultas da configuração não correm numa transação `RepeatableRead`; aceitável com o *rebuild* *offline*;
+  - 6: o `DocumentsInitializer` só apanha `MongoException` e `TimeoutException`; outra exceção pararia o *host*;
+  - 7: o teste do AC-12 corre ao mesmo tempo que o inicializador do *host*;
+  - 8: as bases de dados dos testes não são apagadas, e a base 1 do Redis só é segura porque a coleção "Api" corre em série;
+  - 9: o `catch (Exception)` da ferramenta é uma exceção à regra do CLAUDE.md, justificada por ser o limite do processo.
+
+## F5a: verificação manual contra o `compose.yaml`
+
+- **Data:** 2026-11-27
+- **Feito:** a pedido do Diogo, verificação ponta a ponta no ambiente local (`docker compose up -d --wait`). As cadeias de ligação foram montadas a partir do `.env` só no processo, sem as mostrar: a Api como `smartparking_api` e a ferramenta como `smartparking_workers`.
+  - `SensorSimulator --provision --spots 200 --zones 5 --seed 5027` registou o parque `01a21d53-c5af-7dff-a5d5-f646b0c4677b`.
+  - Uma emissão de 2 min (`--mean-interval 30 --seed 5027`) terminou com 828 eventos aceites, sem duplicados, rejeitados nem repetições.
+  - `ProjectionRebuilder` corrido duas vezes, ambas com código 0: 6 parques, 13 zonas e 223 lugares ativos (incluindo os parques de verificações anteriores), 220 últimos eventos lidos, todos `applied`.
+  - Impressão digital da vista, lida por um script Lua só de leitura (chaves `avail:*` ordenadas, valores ordenados, SHA-1): igual nas duas execuções, com 249 chaves e 126 lugares ocupados.
+  - Confronto com o MongoDB no parque provisionado: o último evento é `Occupied` em 116 lugares e `Freed` em 83; o lugar restante não teve eventos e conta como livre. Dá 84 livres em 200, que é o `free`/`total` do hash do parque no Redis.
+  - O `explain` da agregação do *rebuild* usa o índice `spotId_1_timestamp_-1__id_-1` com `DISTINCT_SCAN` e sem `COLLSCAN`. Fica fechado o risco do plano.
+  - O inicializador criou o índice no arranque da Api sem `Warning`.
+
+  São contagens de verificação, não medições: a duração do *rebuild* mede-se na F12.
+- **Problemas:** a primeira provisão falhou com 409 (`ix_parking_facilities_operator_id_name`), porque a semente 42 já tinha sido usada numa verificação anterior na mesma base de dados. Repetiu-se com a semente 5027.
+- **Decisões:** nenhuma.

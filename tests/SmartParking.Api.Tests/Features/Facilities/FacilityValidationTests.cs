@@ -52,7 +52,7 @@ public sealed class FacilityValidationTests(ApiFixture fixture)
         var valid = FacilityApi.NewRequest();
         return scenario switch
         {
-            "latitude out of range" => valid with { Latitude = 90.5 },
+            "latitude out of range" => valid with { Latitude = 85.1 },
             "unknown time zone" => valid with { TimeZone = "Europe/Atlantis" },
             "opensAt not before closesAt" => valid with { OpeningHours = [new OpeningHoursRequest(1, new TimeOnly(20, 0), new TimeOnly(8, 0))] },
             "repeated day" => valid with

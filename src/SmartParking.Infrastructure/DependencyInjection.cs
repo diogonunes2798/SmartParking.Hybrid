@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using SmartParking.Application.Abstractions;
+using SmartParking.Application.Abstractions.Availability;
 using SmartParking.Application.Abstractions.Documents;
 using SmartParking.Infrastructure.Cache;
 using SmartParking.Infrastructure.Documents;
@@ -86,6 +87,17 @@ public static class DependencyInjection
         services
             .AddRelational(configuration, healthChecks, timeout)
             .AddSingleton<IOccupancyEventLog, MonolithicOccupancyEventLogPending>()
+            .AddMonolithicAvailabilityPending()
             .AddMessaging()
             .AddPayments();
+
+    private static IServiceCollection AddMonolithicAvailabilityPending(this IServiceCollection services)
+    {
+        services.AddSingleton<MonolithicAvailabilityPending>();
+        services.AddSingleton<IOccupancyProjector>(provider => provider.GetRequiredService<MonolithicAvailabilityPending>());
+        services.AddSingleton<IAvailabilityViewStore>(provider => provider.GetRequiredService<MonolithicAvailabilityPending>());
+        services.AddSingleton<ILatestOccupancyEventReader>(provider => provider.GetRequiredService<MonolithicAvailabilityPending>());
+        services.AddSingleton<IOccupancyEventIndexes>(provider => provider.GetRequiredService<MonolithicAvailabilityPending>());
+        return services;
+    }
 }

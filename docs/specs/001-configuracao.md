@@ -2,6 +2,7 @@
 
 **Status:** Approved (2026-11-24)
 **Date:** 2026-11-24
+**Revisto:** 2026-11-27, por decisão do Diogo na revisão da F5a: a latitude do parque passa a [−85,05112878, 85,05112878], o intervalo que o índice GEO do Redis aceita (especificação 004; ADR 0010).
 **Fase:** F2 · **Secção da tese:** 5.1, 5.4, 5.9.2 · **Requisitos:** RF-06; UC-02 e UC-05 (configuração); RNF-06 (auditoria só por acréscimo) · **Depende de:** F1 (spec 000)
 
 ## Problem
@@ -63,7 +64,7 @@ Nomes de tabelas em `snake_case`, no plural. Identificadores `Guid` (UUID v7 ger
 | Entidade | Campos | Restrições |
 |---|---|---|
 | `Operator` | id, name | name único. Um operador de referência com `Guid` fixo entra por `HasData` na `Initial`. Sem *endpoints* na F2 |
-| `ParkingFacility` | id, operatorId, name, address, location (`geography(Point,4326)`), timeZone (IANA), status (`Active`/`Inactive`), xmin | FK → operators (RESTRICT); (operatorId, name) único; índice GiST em location; latitude ∈ [−90, 90] e longitude ∈ [−180, 180]; timeZone válido |
+| `ParkingFacility` | id, operatorId, name, address, location (`geography(Point,4326)`), timeZone (IANA), status (`Active`/`Inactive`), xmin | FK → operators (RESTRICT); (operatorId, name) único; índice GiST em location; latitude ∈ [−85,05112878, 85,05112878] (limite da projeção Web Mercator, o do índice GEO do Redis) e longitude ∈ [−180, 180]; timeZone válido |
 | `FacilityOpeningHours` | facilityId, dayOfWeek (0–6), opensAt, closesAt | PK (facilityId, dayOfWeek); `CHECK opensAt < closesAt`; um intervalo por dia; sem linha = fechado. Faz parte do agregado do parque: `ON DELETE CASCADE` (a única exceção ao RESTRICT). Substitui-se por inteiro no PUT do parque |
 | `Zone` | id, facilityId, name, xmin | FK → facilities (RESTRICT); (facilityId, name) único |
 | `ParkingSpot` | id, facilityId, zoneId, code, type (`Standard`/`Accessible`/`ElectricVehicle`/`Motorcycle`), status (`Active`/`Inactive`), xmin | FK → facilities e FK composta (facilityId, zoneId) → zones(facilityId, id), ambas RESTRICT, para que a zona seja do mesmo parque; (facilityId, code) único; facilityId imutável; zoneId pode mudar dentro do parque |
@@ -250,7 +251,7 @@ Cada AC tem um teste com o seu número no nome (`…_ACn`), exceto os marcados c
 - **AC-16 (mudar de zona).** Dado um lugar na zona Z1:
   - mudá-lo para a zona Z2 do mesmo parque dá 200 e um `SpotUpdated.v1` com `previousZoneId = Z1` e `zoneId = Z2`;
   - mudá-lo para uma zona de outro parque dá 400.
-- **AC-17 (validação).** Pedidos com latitude fora de [−90, 90], fuso desconhecido, horário com `opensAt ≥ closesAt`, `pricePerHour` negativo ou `billingIncrementMinutes = 0` dão 400 com `ValidationProblemDetails`, e o *handler* não é chamado.
+- **AC-17 (validação).** Pedidos com latitude fora de [−85,05112878, 85,05112878], fuso desconhecido, horário com `opensAt ≥ closesAt`, `pricePerHour` negativo ou `billingIncrementMinutes = 0` dão 400 com `ValidationProblemDetails`, e o *handler* não é chamado.
 - **AC-18 (leitura e paginação).** Dados 25 lugares:
   - `GET …/spots?page=2&pageSize=10` devolve 10 itens e `totalCount = 25`;
   - `pageSize = 101` dá 400;

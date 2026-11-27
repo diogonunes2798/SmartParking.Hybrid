@@ -1,0 +1,16 @@
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft": "Warning"
+    }
+  },
+  "Persistence": {
+    "Mode": "Hybrid"
+  },
+  "ConnectionStrings": {
+    "Postgres": "Host=localhost;Port=5432;Database=smartparking;Username=smartparking_workers",
+    "Mongo": "mongodb://localhost:27017/?replicaSet=rs0",
+    "Redis": "localhost:6379"
+  }
+}

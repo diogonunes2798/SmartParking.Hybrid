@@ -4,6 +4,8 @@
     <ProjectReference Include="..\..\src\SmartParking.Api\SmartParking.Api.csproj" />
     <!-- The simulator's tests (spec 003, F4b) reuse the Api host and the databases of the "Api" collection. -->
     <ProjectReference Include="..\..\tools\SensorSimulator\SensorSimulator.csproj" />
+    <!-- The rebuilder's tests (spec 004, F5a) seed the configuration and the event log through the Api host. -->
+    <ProjectReference Include="..\..\tools\ProjectionRebuilder\ProjectionRebuilder.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using MongoDB.Driver;
 using Npgsql;
 using SmartParking.Application.Abstractions.Documents;
+using SmartParking.Application.Features.Ingestion;
 using SmartParking.Api.Tests.Fixtures;
 using SmartParking.Infrastructure;
 using SmartParking.Infrastructure.Documents;
@@ -138,7 +139,7 @@ public sealed class IngestionStoresTests(ApiFixture fixture)
             services.AddSingleton<IOccupancyEventLog, UnavailableEventLog>());
         using var client = factory.CreateClient();
         var site = await CreateSiteAsync(client, 1, cancellationToken);
-        using var recorder = new IngestionMeterRecorder(factory.Services);
+        using var recorder = new MeterRecorder(factory.Services, IngestionMetrics.MeterName);
         var valid = Event(site.Spots[0], Past);
         var unknown = Event(ConfigurationApi.NewHardwareId(), site.Spots[0].SpotId, Past);
 

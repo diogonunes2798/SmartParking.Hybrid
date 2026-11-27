@@ -3,6 +3,7 @@ using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SmartParking.Application.Abstractions.Messaging;
+using SmartParking.Application.Features.Availability;
 using SmartParking.Application.Features.Ingestion;
 
 namespace SmartParking.Application;
@@ -24,6 +25,9 @@ public static class DependencyInjection
 
         // Instruments of the SmartParking.Ingestion meter (spec 003); IMeterFactory comes from the host.
         services.TryAddSingleton<IngestionMetrics>();
+
+        // Instruments of the SmartParking.Availability meter (spec 004).
+        services.TryAddSingleton<AvailabilityMetrics>();
 
         return services;
     }
